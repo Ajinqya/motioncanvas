@@ -1,0 +1,20 @@
+{
+  "id": "ibm-logo",
+  "name": "IBM Logo Reveal",
+  "createdAt": "2026-02-04T12:00:00Z",
+  "updatedAt": "2026-02-04T18:45:03.139Z",
+  "source": {
+    "type": "none",
+    "notes": "Classic IBM 8-bar logo with scanline reveal animation"
+  },
+  "prompt": "Animate the IBM logo SVG with horizontal stripe reveal effect",
+  "paramsNotes": "Supports multiple reveal styles: scanline (default), wipe, fade, and scale. Includes glow effects for tech aesthetic.",
+  "tags": [
+    "logo",
+    "ibm",
+    "corporate",
+    "tech",
+    "reveal",
+    "scanline"
+  ]
+}

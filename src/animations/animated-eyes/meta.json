@@ -1,0 +1,16 @@
+{
+  "id": "animated-eyes",
+  "name": "Animated Eyes",
+  "createdAt": "2026-02-04T14:53:33.158Z",
+  "updatedAt": "2026-02-04T18:02:56.470Z",
+  "source": {
+    "type": "none"
+  },
+  "prompt": "Animate the eyes in this svg to have multiple loop patterns like Rotation, left to right, top to bottom, scaling - small to big. Allow for customizing the corner radii and the color of the background.",
+  "tags": [
+    "eyes",
+    "animation",
+    "loop",
+    "svg"
+  ]
+}

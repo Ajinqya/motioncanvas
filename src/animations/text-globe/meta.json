@@ -1,0 +1,19 @@
+{
+  "id": "text-globe",
+  "name": "Text Globe",
+  "createdAt": "2026-02-04T00:00:00.000Z",
+  "updatedAt": "2026-02-04T18:44:28.860Z",
+  "source": {
+    "type": "screenshot",
+    "notes": "Text sphere with 'around the world' lettering forming a globe shape"
+  },
+  "prompt": "Create a text globe animation where 'around the world' lettering forms a sphere. Animation has two parts: 1. Scaling reveal from the north pole 2. Each alternate strip of text moves in opposite directions (rotating).",
+  "tags": [
+    "text",
+    "globe",
+    "sphere",
+    "3d",
+    "typography",
+    "rotation"
+  ]
+}

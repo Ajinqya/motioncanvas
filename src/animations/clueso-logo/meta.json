@@ -1,0 +1,17 @@
+{
+  "id": "clueso-logo",
+  "name": "Clueso Logo",
+  "createdAt": "2026-02-04T16:30:00.000Z",
+  "updatedAt": "2026-02-04T16:30:43.619Z",
+  "source": {
+    "type": "none"
+  },
+  "prompt": "Animate the Clueso logo with ease-out motion. The puzzle icon parts and each letter animate in with staggered timing, scaling from 50% to 100% with opacity fade-in using cubic ease-out.",
+  "tags": [
+    "logo",
+    "ease-out",
+    "stagger",
+    "scale",
+    "brand"
+  ]
+}

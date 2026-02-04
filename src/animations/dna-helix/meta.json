@@ -1,0 +1,20 @@
+{
+  "id": "dna-helix",
+  "name": "DNA Double Helix",
+  "createdAt": "2026-02-04T12:00:00.000Z",
+  "updatedAt": "2026-02-04T17:52:23.331Z",
+  "source": {
+    "type": "screenshot",
+    "notes": "User provided reference image of DNA double helix with purple circles"
+  },
+  "prompt": "Make a double helix DNA structure as attached in the image. The circles move up and down and scale up and down to create fake 3D effect.",
+  "tags": [
+    "dna",
+    "helix",
+    "3d-effect",
+    "biology",
+    "science",
+    "circles",
+    "purple"
+  ]
+}

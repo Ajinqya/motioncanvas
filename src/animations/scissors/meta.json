@@ -1,0 +1,18 @@
+{
+  "id": "scissors",
+  "name": "Scissors",
+  "createdAt": "2026-02-04T00:00:00.000Z",
+  "updatedAt": "2026-02-04T17:06:14.032Z",
+  "source": {
+    "type": "none",
+    "notes": "Created from SVG icon with cutting animation"
+  },
+  "prompt": "Animate scissors with cutting/snipping motion: open → closed → open",
+  "tags": [
+    "icon",
+    "scissors",
+    "cutting",
+    "tool",
+    "utility"
+  ]
+}

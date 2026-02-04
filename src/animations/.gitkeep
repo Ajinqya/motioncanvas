@@ -1,0 +1,5 @@
+# This folder contains finalized animations.
+# Each animation has its own subfolder with:
+#   - index.ts: The animation definition
+#   - meta.json: Metadata (prompt, tags, source info)
+#   - thumb.png (optional): Preview thumbnail

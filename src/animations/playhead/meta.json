@@ -1,0 +1,15 @@
+{
+  "id": "playhead",
+  "name": "Playhead",
+  "createdAt": "2026-02-04",
+  "source": "user-provided",
+  "prompt": "Animate the playhead to move from left to right and loop",
+  "tags": [
+    "icon",
+    "playhead",
+    "timeline",
+    "media",
+    "controls"
+  ],
+  "updatedAt": "2026-02-04T16:45:32.483Z"
+}

@@ -1,0 +1,20 @@
+{
+  "id": "words-in-motion",
+  "name": "Words in Motion",
+  "createdAt": "2026-02-04T00:00:00.000Z",
+  "updatedAt": "2026-02-04T18:26:03.384Z",
+  "source": {
+    "type": "none",
+    "notes": "Kinetic typography with arc path - letters stay upright for readability"
+  },
+  "prompt": "Create kinetic typography for the phrase 'words in motion' with arc path. Letters stay upright and readable while flowing along the curve.",
+  "paramsNotes": "Arc Height controls curve intensity. Arc Direction: up (smile) or down (frown). Flow Direction animates text movement along the arc.",
+  "tags": [
+    "typography",
+    "kinetic",
+    "text",
+    "arc",
+    "motion",
+    "readable"
+  ]
+}

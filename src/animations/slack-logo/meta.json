@@ -1,0 +1,20 @@
+{
+  "id": "slack-logo",
+  "name": "Staggered Logo Reveal",
+  "createdAt": "2026-02-03T22:50:26.637Z",
+  "updatedAt": "2026-02-04T17:51:38.650Z",
+  "source": {
+    "type": "figma",
+    "figmaUrl": "https://www.figma.com/design/RKbDWsvXEGxSqowLx3YEs5/Visual-Design-Playground?node-id=1369-1121"
+  },
+  "prompt": "Create a bouncy logo animation with clockwise rotation. Each path scales in sequentially from 0 to 100% staggered one after the other. Blue bar, blue droplet, green bar, green droplet, yellow bar, yellow droplet, red bar, red droplet. The entire logo rotates from -270° to 0° with a premium dark background and glowing effects.",
+  "tags": [
+    "logo",
+    "motion",
+    "stagger",
+    "scale",
+    "rotation",
+    "glow",
+    "premium"
+  ]
+}
