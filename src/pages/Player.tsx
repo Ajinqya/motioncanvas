@@ -11,7 +11,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Slider } from '@/components/ui/slider';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Play, Pause, RotateCcw, Save, Download } from 'lucide-react';
+import { ArrowLeft, Play, Pause, RotateCcw, Save, Download, Settings2, X } from 'lucide-react';
 
 export function Player() {
   const { id } = useParams<{ id: string }>();
@@ -66,6 +66,7 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
   const [currentFrame, setCurrentFrame] = useState(0);
   const [showExport, setShowExport] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const { definition } = entry;
   const isSimple = isSimpleAnimation(definition);
@@ -160,43 +161,56 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
     <div className="h-screen bg-background flex flex-col overflow-hidden">
       {/* Sticky header */}
       <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 flex-shrink-0">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" asChild>
+        <div className="container mx-auto px-4 py-3 sm:py-4 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+            <Button variant="ghost" size="icon" asChild className="flex-shrink-0">
               <Link to="/">
                 <ArrowLeft className="h-5 w-5" />
               </Link>
             </Button>
-            <h1 className="text-2xl font-bold">{definition.name}</h1>
+            <h1 className="text-lg sm:text-2xl font-bold truncate">{definition.name}</h1>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Settings toggle for mobile */}
+            <Button
+              variant={sidebarOpen ? 'default' : 'outline'}
+              size="icon"
+              className="lg:hidden"
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+            >
+              {sidebarOpen ? <X className="h-4 w-4" /> : <Settings2 className="h-4 w-4" />}
+            </Button>
             {!isSimple && (
               <Button
                 variant={saveStatus === 'success' ? 'default' : 'outline'}
                 onClick={handleSaveDefaults}
                 disabled={saveStatus === 'saving'}
+                className="hidden sm:flex"
               >
                 <Save className="h-4 w-4" />
-                {saveStatus === 'saving' && 'Saving...'}
-                {saveStatus === 'success' && 'Saved!'}
-                {saveStatus === 'error' && 'Error'}
-                {saveStatus === 'idle' && 'Save as Default'}
+                <span className="hidden md:inline">
+                  {saveStatus === 'saving' && 'Saving...'}
+                  {saveStatus === 'success' && 'Saved!'}
+                  {saveStatus === 'error' && 'Error'}
+                  {saveStatus === 'idle' && 'Save as Default'}
+                </span>
               </Button>
             )}
             <Button
               variant={showExport ? 'default' : 'outline'}
               onClick={() => setShowExport(!showExport)}
+              className="hidden sm:flex"
             >
               <Download className="h-4 w-4" />
-              {showExport ? 'Hide Export' : 'Export'}
+              <span className="hidden md:inline">{showExport ? 'Hide Export' : 'Export'}</span>
             </Button>
           </div>
         </div>
       </header>
 
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 min-h-0 relative">
         {/* Main content area - canvas fixed at center, no scroll */}
-        <div className="flex-1 flex items-center justify-center p-8 overflow-hidden">
+        <div className="flex-1 flex items-center justify-center p-4 sm:p-8 overflow-hidden">
           <canvas
             ref={canvasRef}
             className="max-w-full max-h-full rounded-lg shadow-lg"
@@ -206,8 +220,62 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
           />
         </div>
 
-        {/* Sidebar - only this scrolls */}
-        <aside className="w-80 border-l bg-muted/30 overflow-y-auto flex-shrink-0 pb-20">
+        {/* Mobile sidebar overlay */}
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+
+        {/* Sidebar - slides in on mobile, fixed on desktop */}
+        <aside
+          className={`
+            fixed lg:relative inset-y-0 right-0 z-50 lg:z-auto
+            w-80 max-w-[85vw] border-l bg-background lg:bg-muted/30 
+            overflow-y-auto flex-shrink-0 pb-20
+            transform transition-transform duration-300 ease-in-out
+            ${sidebarOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'}
+          `}
+        >
+          {/* Mobile header for sidebar */}
+          <div className="lg:hidden sticky top-0 z-10 flex items-center justify-between p-4 border-b bg-background">
+            <h2 className="font-semibold">Settings</h2>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setSidebarOpen(false)}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+
+          {/* Mobile action buttons */}
+          <div className="lg:hidden p-4 border-b space-y-2">
+            {!isSimple && (
+              <Button
+                variant={saveStatus === 'success' ? 'default' : 'outline'}
+                onClick={handleSaveDefaults}
+                disabled={saveStatus === 'saving'}
+                className="w-full"
+              >
+                <Save className="h-4 w-4 mr-2" />
+                {saveStatus === 'saving' && 'Saving...'}
+                {saveStatus === 'success' && 'Saved!'}
+                {saveStatus === 'error' && 'Error'}
+                {saveStatus === 'idle' && 'Save as Default'}
+              </Button>
+            )}
+            <Button
+              variant={showExport ? 'default' : 'outline'}
+              onClick={() => setShowExport(!showExport)}
+              className="w-full"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              {showExport ? 'Hide Export' : 'Export'}
+            </Button>
+          </div>
+
           <div className="p-4">
             {!isSimple && (
               <ParameterPanel
@@ -256,13 +324,14 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
       </div>
 
       {/* Player controls - full width at bottom */}
-      <div className="flex-shrink-0 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-50">
-        <div className="px-6 py-4">
-          <div className="flex items-center gap-4">
+      <div className="flex-shrink-0 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-30">
+        <div className="px-4 sm:px-6 py-3 sm:py-4">
+          <div className="flex items-center gap-2 sm:gap-4">
             <Button
               variant="outline"
               size="icon"
               onClick={togglePlay}
+              className="flex-shrink-0"
             >
               {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
             </Button>
@@ -270,12 +339,13 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
               variant="outline"
               size="icon"
               onClick={restart}
+              className="flex-shrink-0"
             >
               <RotateCcw className="h-4 w-4" />
             </Button>
 
             {durationSec && (
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <Slider
                   min={0}
                   max={durationSec}
@@ -287,12 +357,12 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
               </div>
             )}
 
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="flex items-center gap-1 sm:gap-2 text-xs sm:text-sm text-muted-foreground flex-shrink-0">
               <span>{currentTime.toFixed(2)}s</span>
-              <span>|</span>
-              <span>Frame {currentFrame}</span>
-              <span>|</span>
-              <span>{definition.fps ?? 60} FPS</span>
+              <span className="hidden sm:inline">|</span>
+              <span className="hidden sm:inline">Frame {currentFrame}</span>
+              <span className="hidden md:inline">|</span>
+              <span className="hidden md:inline">{definition.fps ?? 60} FPS</span>
             </div>
           </div>
         </div>
