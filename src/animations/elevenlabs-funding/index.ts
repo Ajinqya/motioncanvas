@@ -28,8 +28,6 @@ interface FundingParams {
 // Easing functions
 const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
 const easeOutQuart = (t: number): number => 1 - Math.pow(1 - t, 4);
-const easeInOutCubic = (t: number): number =>
-  t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
 // Noise texture generation (cached)
 let noiseCanvas: HTMLCanvasElement | OffscreenCanvas | null = null;

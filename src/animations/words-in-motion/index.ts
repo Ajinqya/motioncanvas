@@ -1,5 +1,5 @@
 import type { AnimationDefinition } from '../../runtime/types';
-import { number, color, boolean, folder, select } from '../../runtime/params';
+import { number, color, folder, select } from '../../runtime/params';
 
 /**
  * Words in Motion - Kinetic Typography

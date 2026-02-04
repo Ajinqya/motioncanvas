@@ -27,11 +27,6 @@ function easeOutCubic(t: number): number {
   return 1 - Math.pow(1 - t, 3);
 }
 
-// Ease-out quart for even smoother deceleration
-function easeOutQuart(t: number): number {
-  return 1 - Math.pow(1 - t, 4);
-}
-
 // Clamp value between 0 and 1
 function clamp01(t: number): number {
   return Math.max(0, Math.min(1, t));

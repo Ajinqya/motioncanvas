@@ -218,86 +218,140 @@ export function generateExternalEditorCode<P = Record<string, unknown>>(
   // Extract external dependencies from source code
   let externalDeps = '';
   if (_sourceCode) {
-    // Find where the animation definition starts
-    const animationMatch = _sourceCode.match(/const\s+animation\s*[=:]/);
-    if (animationMatch && animationMatch.index) {
-      const beforeAnimation = _sourceCode.substring(0, animationMatch.index);
+    const declarations: string[] = [];
+    const lines = _sourceCode.split('\n');
+    
+    let currentDecl = '';
+    let depth = 0;
+    let inDeclaration = false;
+    let inAnimationDef = false;
+    let declarationType = ''; // 'const' or 'function'
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
       
-      // Find all const declarations (not imports, interfaces, or types)
-      const declarations: string[] = [];
+      // Track if we're inside the animation definition
+      if (trimmed.match(/^const\s+animation\s*[=:]/)) {
+        inAnimationDef = true;
+        depth = 0;
+      }
       
-      // Split into potential declaration blocks
-      // Look for lines starting with "const " that aren't inside the animation
-      let currentDecl = '';
-      let depth = 0;
-      let inDeclaration = false;
+      if (inAnimationDef) {
+        for (const c of line) {
+          if (c === '{') depth++;
+          if (c === '}') depth--;
+        }
+        if (depth === 0 && trimmed.endsWith('};')) {
+          inAnimationDef = false;
+        }
+        continue;
+      }
       
-      for (const line of beforeAnimation.split('\n')) {
-        const trimmed = line.trim();
+      // Skip lines we don't care about when not in a declaration
+      if (!inDeclaration) {
+        if (trimmed.startsWith('import ') ||
+            trimmed.startsWith('export ') ||
+            trimmed.startsWith('//') ||
+            trimmed.startsWith('/*') ||
+            trimmed.startsWith('*') ||
+            trimmed.startsWith('interface ') ||
+            trimmed.startsWith('type ') ||
+            trimmed === '') {
+          continue;
+        }
         
-        // Skip imports, comments, interfaces, types, empty lines
-        if (!inDeclaration) {
-          if (trimmed.startsWith('import ') ||
-              trimmed.startsWith('//') ||
-              trimmed.startsWith('/*') ||
-              trimmed.startsWith('*') ||
-              trimmed.startsWith('interface ') ||
-              trimmed.startsWith('type ') ||
-              trimmed === '' ||
-              trimmed.startsWith('export ')) {
-            continue;
-          }
-          
-          // Start of a const or function declaration
-          if (trimmed.startsWith('const ') || trimmed.startsWith('function ')) {
-            inDeclaration = true;
-            currentDecl = line;
-            depth = 0;
-            // Count brackets on this line
-            for (const c of line) {
-              if (c === '{' || c === '[' || c === '(') depth++;
-              if (c === '}' || c === ']' || c === ')') depth--;
-            }
-            // Check if declaration ends on same line
-            if (depth === 0 && (trimmed.endsWith(';') || trimmed.endsWith('}'))) {
-              declarations.push(currentDecl);
-              currentDecl = '';
-              inDeclaration = false;
-            }
-          }
-        } else {
-          // Continue collecting declaration
-          currentDecl += '\n' + line;
+        // Start of a top-level const declaration
+        if (trimmed.startsWith('const ') && !trimmed.includes('animation')) {
+          inDeclaration = true;
+          declarationType = 'const';
+          currentDecl = line;
+          depth = 0;
           for (const c of line) {
             if (c === '{' || c === '[' || c === '(') depth++;
             if (c === '}' || c === ']' || c === ')') depth--;
           }
-          // Check if declaration ends
-          if (depth === 0 && (trimmed.endsWith(';') || trimmed.endsWith('];') || trimmed.endsWith('};'))) {
+          // Arrow function without braces ends with ; on same line or next non-empty line
+          if (depth === 0 && trimmed.endsWith(';')) {
+            declarations.push(currentDecl);
+            currentDecl = '';
+            inDeclaration = false;
+          }
+          continue;
+        }
+        
+        // Start of a function declaration
+        if (trimmed.startsWith('function ')) {
+          inDeclaration = true;
+          declarationType = 'function';
+          currentDecl = line;
+          depth = 0;
+          for (const c of line) {
+            if (c === '{') depth++;
+            if (c === '}') depth--;
+          }
+          if (depth === 0 && trimmed.endsWith('}')) {
+            declarations.push(currentDecl);
+            currentDecl = '';
+            inDeclaration = false;
+          }
+          continue;
+        }
+      }
+      
+      // Continue collecting multi-line declaration
+      if (inDeclaration) {
+        currentDecl += '\n' + line;
+        for (const c of line) {
+          if (c === '{' || c === '[' || c === '(') depth++;
+          if (c === '}' || c === ']' || c === ')') depth--;
+        }
+        
+        // Check end conditions based on declaration type
+        if (declarationType === 'const') {
+          // const ends with ; when depth is 0, or just check for semicolon at end
+          if (depth <= 0 && trimmed.endsWith(';')) {
+            declarations.push(currentDecl);
+            currentDecl = '';
+            inDeclaration = false;
+          }
+        } else if (declarationType === 'function') {
+          // function ends with } when depth is 0
+          if (depth === 0 && trimmed.endsWith('}')) {
             declarations.push(currentDecl);
             currentDecl = '';
             inDeclaration = false;
           }
         }
       }
-      
-      // Clean up TypeScript annotations from declarations
-      if (declarations.length > 0) {
-        externalDeps = declarations
-          .map(decl => {
-            return decl
-              // Remove type annotations after variable names: const x: Type = -> const x =
-              .replace(/const\s+(\w+)\s*:\s*[^=]+=/, 'const $1 =')
-              // Remove return type annotations: (t: number): number => -> (t) =>
-              .replace(/\(([^)]*)\)\s*:\s*\w+\s*=>/g, '($1) =>')
-              // Remove param type annotations: (t: number) -> (t)
-              .replace(/(\w+)\s*:\s*\w+/g, '$1')
-              // Clean up extra spaces
-              .replace(/\(\s+/g, '(')
-              .replace(/\s+\)/g, ')');
-          })
-          .join('\n\n');
-      }
+    }
+    
+    // Clean up TypeScript annotations
+    if (declarations.length > 0) {
+      externalDeps = declarations
+        .map(decl => {
+          return decl
+            // Remove type parameter from function: function name(x: Type): RetType { -> function name(x) {
+            .replace(/function\s+(\w+)\s*\(([^)]*)\)\s*:\s*\w+\s*\{/g, (_, name, params) => {
+              const cleanParams = params.replace(/:\s*\w+(\[\])?/g, '');
+              return `function ${name}(${cleanParams}) {`;
+            })
+            // Remove type from function params without return type
+            .replace(/function\s+(\w+)\s*\(([^)]*)\)\s*\{/g, (_, name, params) => {
+              const cleanParams = params.replace(/:\s*\w+(\[\])?/g, '');
+              return `function ${name}(${cleanParams}) {`;
+            })
+            // Remove return type annotations from arrow functions: ): number => -> ) =>
+            .replace(/\)\s*:\s*\w+\s*=>/g, ') =>')
+            // Remove param type annotations in arrow functions: (t: number) -> (t)
+            .replace(/\(([^)]*)\)/g, (_, params) => {
+              const cleanParams = params.replace(/:\s*\w+(\[\])?/g, '');
+              return `(${cleanParams})`;
+            })
+            // Remove const type annotations: const x: Type = -> const x =  
+            .replace(/const\s+(\w+)\s*:\s*[^=]+=\s*/g, 'const $1 = ');
+        })
+        .join('\n\n');
     }
   }
   

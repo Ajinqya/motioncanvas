@@ -164,6 +164,7 @@ const animation: AnimationDefinition<IBMLogoParams> = {
       staggerDelay: 0.11,
       revealDuration: 0.8,
       revealStyle: 'wipe',
+      revealDirection: 'vertical',
       backgroundColor: '#000000',
       stripeColor: '#ffffff',
       glowIntensity: 0.3,
