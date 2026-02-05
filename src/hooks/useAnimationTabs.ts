@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import tabDefaults from '../../tab-organization.json';
 
 export interface AnimationTab {
   id: string;
@@ -13,12 +14,9 @@ export interface TabOrganization {
 const TABS_STORAGE_KEY = 'animation-tabs.v1';
 const ASSIGNMENTS_STORAGE_KEY = 'animation-tab-assignments.v1';
 
-const DEFAULT_TABS: AnimationTab[] = [
-  { id: 'logos', name: 'Logos' },
-  { id: 'backgrounds-patterns', name: 'Backgrounds & Patterns' },
-  { id: 'icons', name: 'Icons' },
-  { id: 'data', name: 'Data' },
-];
+// Loaded from tab-organization.json at build time — kept in sync via "Save as Default"
+const DEFAULT_TABS: AnimationTab[] = tabDefaults.tabs;
+const DEFAULT_ASSIGNMENTS: Record<string, string> = tabDefaults.assignments;
 
 function safeParseJson<T>(value: string | null): T | undefined {
   if (!value) return undefined;
@@ -58,29 +56,8 @@ export function useAnimationTabs() {
   const [assignments, setAssignments] = useState<Record<string, string>>(() => {
     const stored = safeParseJson<Record<string, string>>(localStorage.getItem(ASSIGNMENTS_STORAGE_KEY));
     if (stored && typeof stored === 'object') return stored;
-    return {};
+    return DEFAULT_ASSIGNMENTS;
   });
-
-  // On mount, try to load file-based defaults when localStorage is empty
-  useEffect(() => {
-    const hasLocalTabs = localStorage.getItem(TABS_STORAGE_KEY);
-    if (hasLocalTabs) return;
-
-    fetch('/api/tab-defaults')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: TabOrganization | null) => {
-        if (!data) return;
-        if (Array.isArray(data.tabs) && data.tabs.length > 0) {
-          setTabs(data.tabs);
-        }
-        if (data.assignments && typeof data.assignments === 'object') {
-          setAssignments(data.assignments);
-        }
-      })
-      .catch(() => {
-        // file-based defaults not available
-      });
-  }, []);
 
   useEffect(() => {
     try {
