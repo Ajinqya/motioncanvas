@@ -1,8 +1,0 @@
-{
-  "id": "bouncing-shapes",
-  "name": "Bouncing Shapes",
-  "createdAt": "2026-02-05T00:00:00.000Z",
-  "source": "user-request",
-  "prompt": "A circle bouncing off the floor and then changing shape everytime it hits the floor. Circle -> Hexagon -> Pentagon -> Square -> Triangle -> Circle. Follow the physics accurately.",
-  "tags": ["physics", "shapes", "bounce", "morph", "animation"]
-}

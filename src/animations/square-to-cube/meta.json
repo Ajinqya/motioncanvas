@@ -1,8 +1,0 @@
-{
-  "id": "square-to-cube",
-  "name": "Square to Cube",
-  "createdAt": "2026-02-06",
-  "source": "user-request",
-  "prompt": "Create a square that morphs into a cube and back to a square. should look cinematic.",
-  "tags": ["3D", "morph", "geometric", "isometric", "cinematic", "transformation"]
-}
