@@ -1,0 +1,18 @@
+{
+  "id": "audio-ring",
+  "name": "Audio Ring Visualizer",
+  "createdAt": "2026-02-06",
+  "updatedAt": "2026-02-05T19:06:59.560Z",
+  "source": {
+    "type": "none",
+    "notes": "Audio-reactive ring visualizer with circular frequency bars"
+  },
+  "prompt": "Circular bars radiating from center, bar heights driven by FFT frequency bins, center glow pulses with amplitude, rotation speed affected by energy",
+  "tags": [
+    "audio",
+    "visualizer",
+    "ring",
+    "frequency",
+    "reactive"
+  ]
+}

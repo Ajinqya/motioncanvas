@@ -1,0 +1,12 @@
+{
+  "id": "audio-constellation",
+  "name": "Audio Constellation",
+  "createdAt": "2026-02-06",
+  "updatedAt": "2026-02-06",
+  "source": {
+    "type": "none",
+    "notes": "Particle field with connecting lines that reacts to audio"
+  },
+  "prompt": "Particle field with connecting lines, particles expand/contract with bass, connection distance affected by amplitude, particle movement speed tied to energy",
+  "tags": ["audio", "visualizer", "particles", "constellation", "reactive"]
+}

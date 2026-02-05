@@ -1,0 +1,16 @@
+{
+  "id": "grid-repulsion",
+  "name": "Grid Repulsion",
+  "createdAt": "2026-02-05",
+  "source": "user-request",
+  "prompt": "Create a 16:9 frame with black color and white dotted grid. Have a single dot in focus that acts as the main dot and wherever that main dot is present it will repel its neighbours based on proximity influence. Control the path in which the main dot moves, with usual color and scale params. Grid should fill the entire canvas with controllable density, spacing, and shape options.",
+  "tags": [
+    "grid",
+    "repulsion",
+    "interactive",
+    "physics",
+    "particles",
+    "motion"
+  ],
+  "updatedAt": "2026-02-05T19:03:46.493Z"
+}

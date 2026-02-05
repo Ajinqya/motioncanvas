@@ -2,6 +2,11 @@
  * Core types for the canvas animation runtime
  */
 
+import type { AudioData } from './audio';
+
+// Re-export AudioData for convenience
+export type { AudioData };
+
 /** Context passed to each render frame */
 export interface RenderContext<P = Record<string, unknown>> {
   /** The 2D canvas rendering context */
@@ -22,6 +27,8 @@ export interface RenderContext<P = Record<string, unknown>> {
   params: P;
   /** Frame number (0-indexed) */
   frame: number;
+  /** Audio analysis data (present when audio is loaded, or synthetic in demo mode) */
+  audio?: AudioData;
 }
 
 /** Simple render function format - progress-based (0 to 1) */

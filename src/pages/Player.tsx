@@ -11,7 +11,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Slider } from '@/components/ui/slider';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Play, Pause, RotateCcw, Save, Download, Settings2, X } from 'lucide-react';
+import { ArrowLeft, Play, Pause, RotateCcw, Save, Download, Settings2, X, Music, Upload } from 'lucide-react';
 
 export function Player() {
   const { id } = useParams<{ id: string }>();
@@ -61,18 +61,25 @@ export function Player() {
 function PlayerView({ entry }: { entry: AnimationEntry }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const playerRef = useRef<PlayerControls | null>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [currentFrame, setCurrentFrame] = useState(0);
   const [showExport, setShowExport] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [audioLoaded, setAudioLoaded] = useState(false);
+  const [audioFileName, setAudioFileName] = useState<string | null>(null);
 
   const { definition } = entry;
   const isSimple = isSimpleAnimation(definition);
   const durationSec = definition.durationMs
     ? definition.durationMs / 1000
     : undefined;
+  
+  // Check if this is an audio-reactive animation
+  const isAudioAnimation = entry.meta?.tags?.includes('audio') || 
+    (!isSimple && definition.id?.startsWith('audio-'));
 
   // Use our custom parameter hook (only for full format animations)
   const { values: params, onChange: handleParamChange } = useParameters(
@@ -93,6 +100,7 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
       animation: definition,
       params,
       onFrame: handleFrame,
+      audioEnabled: isAudioAnimation,
     });
 
     // Autoplay on load
@@ -101,8 +109,10 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
 
     return () => {
       playerRef.current?.destroy();
+      setAudioLoaded(false);
+      setAudioFileName(null);
     };
-  }, [definition]);
+  }, [definition, isAudioAnimation]);
 
   // Update params when they change
   useEffect(() => {
@@ -123,6 +133,26 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
   const handleSeek = (value: number[]) => {
     const time = value[0];
     playerRef.current?.seek(time);
+  };
+
+  const handleAudioUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !playerRef.current) return;
+    
+    try {
+      await playerRef.current.loadAudio(file);
+      setAudioLoaded(true);
+      setAudioFileName(file.name);
+    } catch (error) {
+      console.error('Failed to load audio:', error);
+      setAudioLoaded(false);
+      setAudioFileName(null);
+    }
+    
+    // Reset input so the same file can be selected again
+    if (audioInputRef.current) {
+      audioInputRef.current.value = '';
+    }
   };
 
   const handleSaveDefaults = async () => {
@@ -171,6 +201,28 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
             <h1 className="text-lg sm:text-2xl font-bold truncate">{definition.name}</h1>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Audio upload for audio-reactive animations */}
+            {isAudioAnimation && (
+              <>
+                <input
+                  ref={audioInputRef}
+                  type="file"
+                  accept="audio/*"
+                  onChange={handleAudioUpload}
+                  className="hidden"
+                />
+                <Button
+                  variant={audioLoaded ? 'default' : 'outline'}
+                  onClick={() => audioInputRef.current?.click()}
+                  className="hidden sm:flex"
+                >
+                  {audioLoaded ? <Music className="h-4 w-4" /> : <Upload className="h-4 w-4" />}
+                  <span className="hidden md:inline ml-2">
+                    {audioLoaded ? audioFileName : 'Load Audio'}
+                  </span>
+                </Button>
+              </>
+            )}
             {/* Settings toggle for mobile */}
             <Button
               variant={sidebarOpen ? 'default' : 'outline'}
@@ -252,6 +304,16 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
 
           {/* Mobile action buttons */}
           <div className="lg:hidden p-4 border-b space-y-2">
+            {isAudioAnimation && (
+              <Button
+                variant={audioLoaded ? 'default' : 'outline'}
+                onClick={() => audioInputRef.current?.click()}
+                className="w-full"
+              >
+                {audioLoaded ? <Music className="h-4 w-4 mr-2" /> : <Upload className="h-4 w-4 mr-2" />}
+                {audioLoaded ? audioFileName : 'Load Audio'}
+              </Button>
+            )}
             {!isSimple && (
               <Button
                 variant={saveStatus === 'success' ? 'default' : 'outline'}

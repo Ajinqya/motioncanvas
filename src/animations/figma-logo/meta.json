@@ -1,0 +1,20 @@
+{
+  "id": "figma-logo",
+  "name": "Figma Logo",
+  "createdAt": "2026-02-05T00:00:00.000Z",
+  "updatedAt": "2026-02-05T18:10:37.321Z",
+  "source": {
+    "type": "none",
+    "notes": "Figma logo animation created from SVG"
+  },
+  "prompt": "Animate Figma logo by making pills appear one after another with ease-out interpolation, no bounce, appearing via translation from different directions",
+  "tags": [
+    "logo",
+    "figma",
+    "staggered",
+    "reveal",
+    "brand",
+    "ease-out",
+    "sequential"
+  ]
+}

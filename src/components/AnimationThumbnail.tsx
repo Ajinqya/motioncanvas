@@ -6,13 +6,16 @@ import { cn } from '@/lib/utils';
 interface AnimationThumbnailProps {
   animation: AnyAnimationDefinition;
   className?: string;
+  /** Control playback externally - defaults to true for backwards compatibility */
+  isPlaying?: boolean;
 }
 
-export function AnimationThumbnail({ animation, className }: AnimationThumbnailProps) {
+export function AnimationThumbnail({ animation, className, isPlaying = true }: AnimationThumbnailProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const playerRef = useRef<PlayerControls | null>(null);
 
+  // Setup player on mount
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -61,8 +64,11 @@ export function AnimationThumbnail({ animation, className }: AnimationThumbnailP
         canvas.style.width = '100%';
         canvas.style.height = '100%';
         
-        // Start playing immediately
-        player.play();
+        // Player starts paused (first frame rendered by createPlayer)
+        // Only play if isPlaying is true
+        if (isPlaying) {
+          player.play();
+        }
       } catch (error) {
         console.error('Failed to create animation preview:', error);
       }
@@ -76,6 +82,18 @@ export function AnimationThumbnail({ animation, className }: AnimationThumbnailP
       }
     };
   }, [animation]);
+
+  // Control playback based on isPlaying prop
+  useEffect(() => {
+    const player = playerRef.current;
+    if (!player) return;
+    
+    if (isPlaying) {
+      player.play();
+    } else {
+      player.pause();
+    }
+  }, [isPlaying]);
 
   return (
     <div 

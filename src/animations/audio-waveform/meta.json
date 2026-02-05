@@ -1,0 +1,18 @@
+{
+  "id": "audio-waveform",
+  "name": "Audio Waveform",
+  "createdAt": "2026-02-06",
+  "updatedAt": "2026-02-05T18:59:51.045Z",
+  "source": {
+    "type": "none",
+    "notes": "Classic oscilloscope-style waveform visualizer"
+  },
+  "prompt": "Oscilloscope-style waveform, time domain data displayed as smooth curve, line thickness and glow pulses with amplitude, supports smooth, sharp, and bar styles",
+  "tags": [
+    "audio",
+    "visualizer",
+    "waveform",
+    "oscilloscope",
+    "reactive"
+  ]
+}

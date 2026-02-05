@@ -1,0 +1,20 @@
+{
+  "id": "framer-logo",
+  "name": "Framer Logo",
+  "createdAt": "2026-02-06T00:00:00.000Z",
+  "updatedAt": "2026-02-05T23:10:36.518Z",
+  "source": {
+    "type": "screenshot",
+    "notes": "Framer logo recreation from reference image"
+  },
+  "prompt": "Modern clean logo animation for Framer logo with glow and inner shadow parameters",
+  "tags": [
+    "logo",
+    "framer",
+    "brand",
+    "glow",
+    "modern",
+    "geometric",
+    "reveal"
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "tabs": [
+    {
+      "id": "logos",
+      "name": "Logos"
+    },
+    {
+      "id": "backgrounds-patterns",
+      "name": "Backgrounds & Patterns"
+    },
+    {
+      "id": "icons",
+      "name": "Icons"
+    },
+    {
+      "id": "data",
+      "name": "Data"
+    },
+    {
+      "id": "typography",
+      "name": "Typography"
+    },
+    {
+      "id": "audio",
+      "name": "Audio"
+    }
+  ],
+  "assignments": {
+    "ibm-logo": "logos",
+    "grid-repulsion": "backgrounds-patterns",
+    "playhead": "icons",
+    "scissors": "icons",
+    "clueso-logo": "logos",
+    "words-in-motion": "typography",
+    "text-globe": "typography",
+    "slack-logo": "logos",
+    "audio-ring": "audio",
+    "audio-waveform": "audio",
+    "figma-logo": "logos",
+    "audio-constellation": "audio"
+  }
+}

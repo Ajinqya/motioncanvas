@@ -1,15 +1,19 @@
 import type { 
   AnimationDefinition, 
   AnyAnimationDefinition,
-  RenderContext
+  RenderContext,
+  AudioData
 } from './types';
 import { isSimpleAnimation } from './types';
+import { createAudioAnalyzer, generateSyntheticAudioData, type AudioAnalyzer } from './audio';
 
 export interface PlayerOptions {
   canvas: HTMLCanvasElement;
   animation: AnyAnimationDefinition;
   params?: Record<string, unknown>;
   onFrame?: (frame: number, time: number) => void;
+  /** Enable audio reactivity (provides synthetic data when no audio loaded) */
+  audioEnabled?: boolean;
 }
 
 export interface PlayerControls {
@@ -23,6 +27,10 @@ export interface PlayerControls {
   getTime: () => number;
   getFrame: () => number;
   setParams: (params: Record<string, unknown>) => void;
+  // Audio controls
+  loadAudio: (file: File | string) => Promise<void>;
+  isAudioLoaded: () => boolean;
+  getAudioDuration: () => number;
 }
 
 /**
@@ -31,7 +39,7 @@ export interface PlayerControls {
  * Supports both full AnimationDefinition and SimpleAnimationDefinition formats.
  */
 export function createPlayer(options: PlayerOptions): PlayerControls {
-  const { canvas, animation, onFrame } = options;
+  const { canvas, animation, onFrame, audioEnabled = false } = options;
   const isSimple = isSimpleAnimation(animation);
   let params = isSimple ? {} : { ...options.params };
 
@@ -51,6 +59,10 @@ export function createPlayer(options: PlayerOptions): PlayerControls {
   let currentFrame = 0;
   let lastFrameTime = 0;
   let rafId: number | null = null;
+  
+  // Audio analyzer
+  let audioAnalyzer: AudioAnalyzer | null = null;
+  let audioLoaded = false;
 
   // HiDPI setup
   const dpr = window.devicePixelRatio || 1;
@@ -63,6 +75,17 @@ export function createPlayer(options: PlayerOptions): PlayerControls {
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
     context.scale(dpr, dpr);
+  }
+
+  function getAudioData(t: number): AudioData | undefined {
+    if (!audioEnabled) return undefined;
+    
+    if (audioAnalyzer && audioLoaded) {
+      return audioAnalyzer.getData();
+    }
+    
+    // Provide synthetic audio data for demo/preview mode
+    return generateSyntheticAudioData(t);
   }
 
   function createRenderContext(t: number, dt: number): RenderContext {
@@ -81,6 +104,7 @@ export function createPlayer(options: PlayerOptions): PlayerControls {
       dpr,
       params,
       frame: currentFrame,
+      audio: getAudioData(t),
     };
   }
 
@@ -150,6 +174,11 @@ export function createPlayer(options: PlayerOptions): PlayerControls {
     startTime = performance.now() - pausedAt * 1000;
     lastFrameTime = performance.now();
     rafId = requestAnimationFrame(tick);
+    
+    // Sync audio playback
+    if (audioAnalyzer && audioLoaded) {
+      audioAnalyzer.play();
+    }
   }
 
   function pause() {
@@ -159,6 +188,11 @@ export function createPlayer(options: PlayerOptions): PlayerControls {
     if (rafId !== null) {
       cancelAnimationFrame(rafId);
       rafId = null;
+    }
+    
+    // Sync audio playback
+    if (audioAnalyzer && audioLoaded) {
+      audioAnalyzer.pause();
     }
   }
 
@@ -173,6 +207,11 @@ export function createPlayer(options: PlayerOptions): PlayerControls {
     currentFrame = Math.floor(currentTime * fps);
     startTime = performance.now() - pausedAt * 1000;
 
+    // Sync audio seek
+    if (audioAnalyzer && audioLoaded) {
+      audioAnalyzer.seek(time);
+    }
+
     // Render the frame at the seek position
     renderFrame(currentTime, 0);
     onFrame?.(currentFrame, currentTime);
@@ -183,6 +222,12 @@ export function createPlayer(options: PlayerOptions): PlayerControls {
     currentTime = 0;
     currentFrame = 0;
     startTime = performance.now();
+    
+    // Sync audio restart
+    if (audioAnalyzer && audioLoaded) {
+      audioAnalyzer.seek(0);
+    }
+    
     renderFrame(0, 0);
     onFrame?.(0, 0);
     if (playing) {
@@ -192,6 +237,37 @@ export function createPlayer(options: PlayerOptions): PlayerControls {
 
   function destroy() {
     pause();
+    
+    // Clean up audio analyzer
+    if (audioAnalyzer) {
+      audioAnalyzer.destroy();
+      audioAnalyzer = null;
+    }
+    audioLoaded = false;
+  }
+  
+  async function loadAudio(file: File | string): Promise<void> {
+    // Create analyzer if needed
+    if (!audioAnalyzer) {
+      audioAnalyzer = createAudioAnalyzer();
+    }
+    
+    await audioAnalyzer.load(file);
+    audioLoaded = true;
+    
+    // Sync to current playback state
+    audioAnalyzer.seek(currentTime);
+    if (playing) {
+      audioAnalyzer.play();
+    }
+  }
+  
+  function isAudioLoaded(): boolean {
+    return audioLoaded;
+  }
+  
+  function getAudioDuration(): number {
+    return audioAnalyzer?.getDuration() ?? 0;
   }
 
   function setParams(newParams: Record<string, unknown>) {
@@ -224,5 +300,9 @@ export function createPlayer(options: PlayerOptions): PlayerControls {
     getTime: () => currentTime,
     getFrame: () => currentFrame,
     setParams,
+    // Audio controls
+    loadAudio,
+    isAudioLoaded,
+    getAudioDuration,
   };
 }

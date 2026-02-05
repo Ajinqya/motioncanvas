@@ -1,0 +1,16 @@
+{
+  "id": "india-population",
+  "name": "India Population Growth",
+  "createdAt": "2026-02-05",
+  "source": "cursor",
+  "prompt": "Create an animation that shows the population of India grow from 2000 to 2025",
+  "tags": [
+    "data-visualization",
+    "counter",
+    "population",
+    "india",
+    "statistics",
+    "growth"
+  ],
+  "updatedAt": "2026-02-05T18:23:12.702Z"
+}

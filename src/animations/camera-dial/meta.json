@@ -1,0 +1,12 @@
+{
+  "id": "camera-dial",
+  "name": "Camera Dial",
+  "createdAt": "2026-02-06T00:00:00.000Z",
+  "updatedAt": "2026-02-06T12:00:00.000Z",
+  "source": {
+    "type": "screenshot",
+    "notes": "Camera mode dial with rotating modes (AUTO, P, A, S, M/Σ, C1, C2, C3, macro tulip icon, night moon icon). Dial rotates with stepped animation, active mode highlighted in red."
+  },
+  "prompt": "Recreate camera mode dial animation with rotating dial and active item highlighting",
+  "tags": ["camera", "dial", "ui", "rotation", "modes", "photography"]
+}
