@@ -41,9 +41,6 @@ interface GridRepulsionParams {
   pathOffsetY: number;
 }
 
-// Easing functions
-const easeInOutSine = (t: number) => -(Math.cos(Math.PI * t) - 1) / 2;
-
 const animation: AnimationDefinition<GridRepulsionParams> = {
   id: 'grid-repulsion',
   name: 'Grid Repulsion',
