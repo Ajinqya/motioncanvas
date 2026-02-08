@@ -1,0 +1,19 @@
+{
+  "id": "apple-clock",
+  "name": "Apple Clock",
+  "createdAt": "2026-02-08T00:00:00.000Z",
+  "updatedAt": "2026-02-08T09:35:19.423Z",
+  "source": {
+    "type": "screenshot",
+    "notes": "Recreated from macOS/iOS clock app icon reference image"
+  },
+  "prompt": "Animate the second hand in the clock. The rotation should be accurate: 60 seconds = 360 degrees. Match the design to the Apple clock icon accurately.",
+  "tags": [
+    "clock",
+    "apple",
+    "time",
+    "seconds",
+    "icon",
+    "ios"
+  ]
+}

@@ -21,22 +21,33 @@
       "name": "Typography"
     },
     {
+      "id": "ui-components",
+      "name": "UI components"
+    },
+    {
+      "id": "illustrations",
+      "name": "Illustrations"
+    },
+    {
       "id": "audio",
       "name": "Audio"
     }
   ],
   "assignments": {
+    "figma-logo": "logos",
     "ibm-logo": "logos",
+    "framer-logo": "logos",
     "grid-repulsion": "backgrounds-patterns",
     "playhead": "icons",
     "scissors": "icons",
-    "clueso-logo": "logos",
-    "words-in-motion": "typography",
     "text-globe": "typography",
-    "slack-logo": "logos",
-    "audio-ring": "audio",
+    "words-in-motion": "typography",
+    "apple-clock": "ui-components",
+    "slider-bars": "ui-components",
+    "animated-eyes": "illustrations",
     "audio-waveform": "audio",
-    "figma-logo": "logos",
-    "audio-constellation": "audio"
+    "code-magnifier": "illustrations",
+    "audio-constellation": "audio",
+    "audio-ring": "audio"
   }
 }

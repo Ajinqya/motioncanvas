@@ -1,4 +1,4 @@
----
+ ---
 description: Animation creation conventions for Motion Graphics project
 globs: src/animations/**/*.ts
 alwaysApply: true

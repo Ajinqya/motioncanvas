@@ -27,7 +27,7 @@ const animation: AnimationDefinition<PlayheadParams> = {
     defaults: {
       scale: 0.6,
       strokeColor: '#d79fdb',
-      backgroundColor: '#5d1599',
+      backgroundColor: '#641599',
       speed: 1,
       moveAmount: 4.5,
     },

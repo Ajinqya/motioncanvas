@@ -1,40 +1,31 @@
 import type { AnimationDefinition } from '../../runtime/types';
 import { number, color, boolean, folder, select } from '../../runtime/params';
 
-/**
- * Animated Eyes SVG
- * Multiple loop patterns: rotation, left-right, top-bottom, scaling
- */
+// Easing functions
+const easeInOutSine = (t: number) => -(Math.cos(Math.PI * t) - 1) / 2;
+const easeInOutCubic = (t: number) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
 interface EyesParams {
   // Background
   backgroundColor: string;
   cornerRadius: number;
-  
   // Eye whites
   eyeWhiteColor: string;
-  
   // Pupils
   pupilColor: string;
-  
   // Animation patterns
   enableRotation: boolean;
   rotationSpeed: number;
-  
   enableHorizontalMove: boolean;
   horizontalMoveSpeed: number;
   horizontalMoveAmount: number;
-  
   enableVerticalMove: boolean;
   verticalMoveSpeed: number;
   verticalMoveAmount: number;
-  
   enableScaling: boolean;
   scalingSpeed: number;
   scaleMin: number;
   scaleMax: number;
-  
-  // Animation mode
   animationPattern: string;
 }
 
@@ -54,18 +45,18 @@ const animation: AnimationDefinition<EyesParams> = {
       eyeWhiteColor: '#EFEEEB',
       pupilColor: '#272723',
       enableRotation: false,
-      rotationSpeed: 3.2,
+      rotationSpeed: 0.2,
       enableHorizontalMove: false,
       horizontalMoveSpeed: 2.5,
       horizontalMoveAmount: 5,
       enableVerticalMove: true,
       verticalMoveSpeed: 0.3,
       verticalMoveAmount: 24,
-      enableScaling: false,
+      enableScaling: true,
       scalingSpeed: 1.5,
       scaleMin: 0.7,
       scaleMax: 1.3,
-      animationPattern: 'all',
+      animationPattern: 'pulse',
     },
     schema: {
       ...folder('Background', {
@@ -112,7 +103,7 @@ const animation: AnimationDefinition<EyesParams> = {
     },
   },
 
-  render({ ctx, time, width, height, params }) {
+  render({ ctx, time, width, height, progress, params }) {
     const {
       backgroundColor,
       cornerRadius,
@@ -148,120 +139,161 @@ const animation: AnimationDefinition<EyesParams> = {
       ctx.closePath();
     };
 
-    // Draw background
+    // Clear and draw background
+    ctx.clearRect(0, 0, width, height);
     ctx.fillStyle = backgroundColor;
     drawRoundedRect(0, 0, width, height, cornerRadius);
     ctx.fill();
 
     // Eye positions (centers of eye whites)
-    const leftEyeX = 86;
-    const leftEyeY = 255;
-    const rightEyeX = 205;
-    const rightEyeY = 255;
+    const leftEye = { x: 86, y: 255 };
+    const rightEye = { x: 205, y: 255 };
     const eyeWhiteRadius = 46;
     const pupilRadius = 25;
+    // The maximum pupil travel distance from the eye center
+    const maxPupilOffset = eyeWhiteRadius - pupilRadius - 2;
 
-    // Calculate animations based on pattern
-    let rotation = 0;
-    let offsetX = 0;
-    let offsetY = 0;
-    let scale = 1;
+    // For independent motion, each eye gets its own timing phase
+    const eyes = [
+      {
+        ...leftEye,
+        phase: 0.12,
+      },
+      {
+        ...rightEye,
+        phase: 0.53,
+      },
+    ];
 
-    // Determine which animations to apply
-    const shouldRotate = (animationPattern === 'all' || animationPattern === 'rotation') && enableRotation;
-    const shouldMoveH = (animationPattern === 'all' || animationPattern === 'horizontal' || animationPattern === 'lookaround') && enableHorizontalMove;
-    const shouldMoveV = (animationPattern === 'all' || animationPattern === 'vertical' || animationPattern === 'lookaround') && enableVerticalMove;
-    const shouldScale = (animationPattern === 'all' || animationPattern === 'scaling' || animationPattern === 'pulse') && enableScaling;
-
-    // Calculate animation values
-    if (shouldRotate) {
-      rotation = time * rotationSpeed * Math.PI * 2;
-    }
-
-    if (shouldMoveH) {
-      offsetX = Math.sin(time * horizontalMoveSpeed * Math.PI) * horizontalMoveAmount;
-    }
-
-    if (shouldMoveV) {
-      offsetY = Math.sin(time * verticalMoveSpeed * Math.PI + Math.PI / 2) * verticalMoveAmount;
-    }
-
-    if (shouldScale) {
-      const scaleRange = scaleMax - scaleMin;
-      scale = scaleMin + (Math.sin(time * scalingSpeed * Math.PI) * 0.5 + 0.5) * scaleRange;
-    }
-
-    // Special pattern: Look Around (sequential movements)
-    if (animationPattern === 'lookaround') {
-      const cycle = time % 4;
-      if (cycle < 1) {
-        // Look left
-        offsetX = -horizontalMoveAmount;
-      } else if (cycle < 2) {
-        // Look right
-        offsetX = horizontalMoveAmount;
-      } else if (cycle < 3) {
-        // Look up
-        offsetY = -verticalMoveAmount;
-      } else {
-        // Look down
-        offsetY = verticalMoveAmount;
-      }
-    }
-
-    // Special pattern: Pulse (smooth breathing effect)
-    if (animationPattern === 'pulse') {
-      scale = scaleMin + (Math.sin(time * scalingSpeed) * 0.5 + 0.5) * (scaleMax - scaleMin);
-      rotation = 0;
-      offsetX = 0;
-      offsetY = 0;
-    }
-
-    // Helper function to draw an eye
-    const drawEye = (eyeX: number, eyeY: number) => {
-      ctx.save();
-      
-      // Draw eye white
-      ctx.fillStyle = eyeWhiteColor;
-      ctx.beginPath();
-      ctx.arc(eyeX, eyeY, eyeWhiteRadius, 0, Math.PI * 2);
-      ctx.fill();
-      
-      // Create clipping mask from eye white circle to contain the pupil
-      ctx.beginPath();
-      ctx.arc(eyeX, eyeY, eyeWhiteRadius, 0, Math.PI * 2);
-      ctx.clip();
-
-      // Calculate pupil position (no longer need strict constraints since we're clipping)
-      const pupilX = eyeX + 21 + offsetX; // Base offset of 21 from original SVG
-      const pupilY = eyeY + offsetY;
-
-      // Draw pupil with transformations (will be clipped to stay inside eye white)
-      ctx.save();
-      ctx.translate(pupilX, pupilY);
-      
+    // Helper to compute each eye's animation state
+    function getEyeAnim(
+      baseTime: number,
+      phase: number
+    ) {
+      let rotation = 0;
+      let offsetX = 0;
+      let offsetY = 0;
+      let scale = 1;
+      // For staggering, let each eye have a phase offset
+      const t = baseTime + phase;
+      // Which animations to apply?
+      const shouldRotate = (animationPattern === 'all' || animationPattern === 'rotation') && enableRotation;
+      const shouldMoveH = (animationPattern === 'all' || animationPattern === 'horizontal' || animationPattern === 'lookaround') && enableHorizontalMove;
+      const shouldMoveV = (animationPattern === 'all' || animationPattern === 'vertical' || animationPattern === 'lookaround') && enableVerticalMove;
+      const shouldScale = (animationPattern === 'all' || animationPattern === 'scaling' || animationPattern === 'pulse') && enableScaling;
+      // Calculate values
       if (shouldRotate) {
-        ctx.rotate(rotation);
+        rotation = t * rotationSpeed * Math.PI * 2;
       }
-      
+      if (shouldMoveH) {
+        // Use easeInOutSine for organic drift
+        offsetX = easeInOutSine(0.5 + 0.5 * Math.sin(t * horizontalMoveSpeed * Math.PI)) * horizontalMoveAmount;
+      }
+      if (shouldMoveV) {
+        offsetY = easeInOutCubic(0.5 + 0.5 * Math.sin(t * verticalMoveSpeed * Math.PI + Math.PI / 2)) * verticalMoveAmount;
+      }
       if (shouldScale) {
-        ctx.scale(scale, scale);
+        const scaleRange = scaleMax - scaleMin;
+        scale = scaleMin + (easeInOutSine(0.5 + 0.5 * Math.sin(t * scalingSpeed * Math.PI))) * scaleRange;
       }
+      // Special pattern: Look Around (each eye cycles in a different order)
+      if (animationPattern === 'lookaround') {
+        const lookCycle = (t % 4);
+        if (lookCycle < 1) {
+          offsetX = -horizontalMoveAmount;
+        } else if (lookCycle < 2) {
+          offsetX = horizontalMoveAmount;
+        } else if (lookCycle < 3) {
+          offsetY = -verticalMoveAmount;
+        } else {
+          offsetY = verticalMoveAmount;
+        }
+      }
+      // Special pattern: Pulse
+      if (animationPattern === 'pulse') {
+        scale = scaleMin + (0.5 + 0.5 * Math.sin(t * scalingSpeed)) * (scaleMax - scaleMin);
+        rotation = 0;
+        offsetX = 0;
+        offsetY = 0;
+      }
+      // Clamp total pupil travel
+      const dist = Math.sqrt(offsetX * offsetX + offsetY * offsetY);
+      if (dist > maxPupilOffset) {
+        const ratio = maxPupilOffset / dist;
+        offsetX *= ratio;
+        offsetY *= ratio;
+      }
+      return { rotation, offsetX, offsetY, scale };
+    }
 
-      ctx.fillStyle = pupilColor;
+    // Draw a single eye
+    function drawEye(cx: number, cy: number, anim: { rotation: number; offsetX: number; offsetY: number; scale: number }) {
+      ctx.save();
+      // Eye white with subtle shadow
+      ctx.shadowColor = 'rgba(0,0,0,0.11)';
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(cx, cy, eyeWhiteRadius, 0, Math.PI * 2);
+      ctx.fillStyle = eyeWhiteColor;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      // Clip to the eye white
+      ctx.beginPath();
+      ctx.arc(cx, cy, eyeWhiteRadius, 0, Math.PI * 2);
+      ctx.clip();
+      // Pupil/iris group
+      ctx.save();
+      // Move the pupil relative to the center of the white
+      ctx.translate(cx + anim.offsetX, cy + anim.offsetY);
+      if (enableRotation && (animationPattern === 'all' || animationPattern === 'rotation')) {
+        ctx.rotate(anim.rotation);
+      }
+      if (enableScaling && (animationPattern === 'all' || animationPattern === 'scaling' || animationPattern === 'pulse')) {
+        ctx.scale(anim.scale, anim.scale);
+      }
+      // Draw iris (subtle gradient for depth)
+      const irisRadius = pupilRadius * 1.1;
+      const irisGrad = ctx.createRadialGradient(0, 0, pupilRadius * 0.2, 0, 0, irisRadius);
+      irisGrad.addColorStop(0, '#4e50a3');
+      irisGrad.addColorStop(0.75, '#23225b');
+      irisGrad.addColorStop(1, 'rgba(35,34,91,0.72)');
+      ctx.beginPath();
+      ctx.arc(0, 0, irisRadius, 0, Math.PI * 2);
+      ctx.fillStyle = irisGrad;
+      ctx.globalAlpha = 0.99;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      // Pupil (with glow)
+      ctx.save();
       ctx.beginPath();
       ctx.arc(0, 0, pupilRadius, 0, Math.PI * 2);
+      ctx.shadowColor = pupilColor;
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = pupilColor;
+      ctx.globalAlpha = 1;
       ctx.fill();
-      
+      ctx.shadowBlur = 0;
       ctx.restore();
-      
-      // Restore to remove clipping mask
+      // Highlight
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(-pupilRadius * 0.33, -pupilRadius * 0.33, pupilRadius * 0.22, 0, Math.PI * 2);
+      ctx.globalAlpha = 0.25;
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+      ctx.globalAlpha = 1;
       ctx.restore();
-    };
+      ctx.restore(); // end pupil group
+      ctx.restore(); // end clip
+      ctx.restore(); // end eye
+    }
 
-    // Draw both eyes
-    drawEye(leftEyeX, leftEyeY);
-    drawEye(rightEyeX, rightEyeY);
+    // Draw both eyes with independent animation
+    for (let i = 0; i < 2; i++) {
+      const eye = eyes[i];
+      const anim = getEyeAnim(time, eye.phase);
+      drawEye(eye.x, eye.y, anim);
+    }
   },
 };
 

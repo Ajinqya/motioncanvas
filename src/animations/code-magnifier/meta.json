@@ -1,0 +1,20 @@
+{
+  "id": "code-magnifier",
+  "name": "Code Magnifier",
+  "createdAt": "2026-02-06",
+  "updatedAt": "2026-02-08T08:09:31.261Z",
+  "source": {
+    "type": "screenshot",
+    "notes": "Based on provided reference image showing a magnifying glass over purple grid with scrolling code"
+  },
+  "prompt": "A magnifying glass hovering over a purple grid background with code text scrolling vertically inside the circular lens. The lens has a thick lavender rim and a handle extending to the bottom-right. Code shows XML/JSX-like UI markup.",
+  "tags": [
+    "code",
+    "magnifier",
+    "scroll",
+    "purple",
+    "ui",
+    "developer",
+    "tools"
+  ]
+}

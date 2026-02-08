@@ -1,0 +1,19 @@
+{
+  "id": "slider-bars",
+  "name": "Slider Bars",
+  "createdAt": "2026-02-08T00:00:00.000Z",
+  "updatedAt": "2026-02-08T09:36:36.699Z",
+  "source": {
+    "type": "screenshot",
+    "notes": "Horizontal slider with vertical bars that animate from 0 to 100%. Bars before the slider position are tall/dark, bars after are short/light with smooth transition."
+  },
+  "prompt": "Slider animation going from 0 to 100 and looping. Bars with varying height based on slider position, smooth continuous motion.",
+  "tags": [
+    "slider",
+    "bars",
+    "progress",
+    "percentage",
+    "ui",
+    "loading"
+  ]
+}
