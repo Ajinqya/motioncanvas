@@ -1,0 +1,17 @@
+{
+  "id": "smooth-wave-animation",
+  "name": "Smooth Wave Animation",
+  "createdAt": "2026-02-08",
+  "updatedAt": "2026-02-08T07:16:41.779Z",
+  "source": "ai-chat",
+  "prompt": "[EXISTING ANIMATION: smooth-wave-animation]\nimport type { AnimationDefinition } from '../../runtime/types';\nimport { number, color, folder } from '../../runtime/params';\n\ninterface SmoothWaveParams {\n  scale: number;\n  primaryColor: string;\n  backgroundColor: string;\n  speed: number;\n  waveAmplitude: number;\n  waveFrequency: number;\n}\n\nconst easeInOutQuad = (t: number) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;\n\nconst animation: AnimationDefinition<SmoothWaveParams> = {\n  id: 'smooth-wave-animation',\n  name: 'Smooth Wave Animation',\n  fps: 60,\n  durationMs: 3000,\n  width: 400,\n  height: 400,\n  background: '#FFFFFF',\n\n  params: {\n    defaults: {\n      scale: 1,\n      primaryColor: '#0000FF',\n      backgroundColor: '#FFFFFF',\n      speed: 1,\n      waveAmplitude: 50,\n      waveFrequency: 3,\n    },\n    schema: {\n      ...folder('Layout', {\n        scale: number({ value: 1, min: 0.1, max: 3, step: 0.1, label: 'Scale' }),\n      }),\n      ...folder('Colors', {\n        primaryColor: color({ value: '#0000FF', label: 'Primary Color' }),\n        backgroundColor: color({ value: '#FFFFFF', label: 'Background' }),\n      }),\n      ...folder('Animation', {\n        speed: number({ value: 1, min: 0.1, max: 3, step: 0.1, label: 'Speed' }),\n        waveAmplitude: number({ value: 50, min: 10, max: 100, step: 1, label: 'Wave Amplitude' }),\n        waveFrequency: number({ value: 3, min: 1, max: 10, step: 0.1, label: 'Wave Frequency' }),\n      }),\n    },\n  },\n\n  render({ ctx, time, width, height, progress, params }) {\n    const { scale, primaryColor, backgroundColor, speed, waveAmplitude, waveFrequency } = params;\n    const adjustedProgress = (progress * speed) % 1;\n    const easedProgress = easeInOutQuad(adjustedProgress);\n\n    ctx.fillStyle = backgroundColor;\n    ctx.fillRect(0, 0, width, height);\n\n    ctx.save();\n    ctx.translate(width / 2, height / 2);\n    ctx.scale(scale, scale);\n\n    ctx.beginPath();\n    ctx.moveTo(-width / 2, 0);\n\n    for (let x = -width / 2; x <= width / 2; x++) {\n      const y = Math.sin((x / width) * waveFrequency * Math.PI * 2 + easedProgress * Math.PI * 2) * waveAmplitude;\n      ctx.lineTo(x, y);\n    }\n\n    ctx.strokeStyle = primaryColor;\n    ctx.lineWidth = 2;\n    ctx.stroke();\n\n    ctx.restore();\n  },\n};\n\nexport default animation;\n[END ANIMATION]\n\nadd a circle that is moving on the wave with proper physics. as the circle approaches the ramp it slows down and as it decends it speeds up.",
+  "tags": [
+    "wave",
+    "physics",
+    "motion",
+    "canvas",
+    "easing",
+    "glow",
+    "seamless-loop"
+  ]
+}
