@@ -103,7 +103,7 @@ const animation: AnimationDefinition<EyesParams> = {
     },
   },
 
-  render({ ctx, time, width, height, progress, params }) {
+  render({ ctx, time, width, height, params }) {
     const {
       backgroundColor,
       cornerRadius,
