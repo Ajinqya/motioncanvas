@@ -1,0 +1,12 @@
+{
+  "id": "syncing-dots",
+  "name": "Syncing Dots",
+  "createdAt": "2026-02-08T00:00:00.000Z",
+  "updatedAt": "2026-02-08T00:00:00.000Z",
+  "source": {
+    "type": "screenshot",
+    "notes": "Created from a reference screenshot of a syncing indicator UI element"
+  },
+  "prompt": "Create an animation which says syncing. The icon is a dot surrounded by 7 dots surrounded by a dashed circle, rotating in opposite directions. Customisable text string.",
+  "tags": ["ui", "syncing", "loading", "indicator", "dots", "rotating"]
+}

@@ -2,11 +2,17 @@
   "id": "text-highlighter",
   "name": "Text Highlighter",
   "createdAt": "2026-02-08T00:00:00.000Z",
-  "updatedAt": "2026-02-08T00:00:00.000Z",
+  "updatedAt": "2026-02-08T10:19:03.188Z",
   "source": {
     "type": "screenshot",
     "notes": "Text highlighter animation inspired by a reference screenshot showing marker-style highlight sweeping across text lines"
   },
   "prompt": "Make a text highlighter animation. Customizable text, text color, highlight color, highlight easing. Shows a yellow highlight sweeping across text with cursor dots at start and end.",
-  "tags": ["text", "highlight", "marker", "typography", "reveal"]
+  "tags": [
+    "text",
+    "highlight",
+    "marker",
+    "typography",
+    "reveal"
+  ]
 }

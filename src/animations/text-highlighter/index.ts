@@ -85,22 +85,22 @@ const animation: AnimationDefinition<TextHighlighterParams> = {
 
   params: {
     defaults: {
-      scale: 1,
-      text: 'Blowbowl is very easy to customise to suit your needs.',
+      scale: 0.6,
+      text: 'Highlight text',
       fontSize: 48,
       fontWeight: 'bold',
       lineHeight: 1.5,
-      textColor: '#2D2A1E',
-      highlightColor: '#FFF3B0',
+      textColor: '#1c1c1c',
+      highlightColor: '#4400ff',
       backgroundColor: '#FFFFFF',
-      highlightOpacity: 1,
+      highlightOpacity: 0.35,
       highlightPaddingX: 4,
       highlightPaddingY: 4,
       showCursors: true,
       cursorSize: 10,
-      cursorColor: '#1A1A1A',
-      speed: 1,
-      easing: 'easeOutCubic',
+      cursorColor: '#691f6b',
+      speed: 1.5,
+      easing: 'easeOutExpo',
       holdTime: 0.2,
     },
     schema: {
@@ -264,100 +264,78 @@ const animation: AnimationDefinition<TextHighlighterParams> = {
     ctx.globalAlpha = 1;
     ctx.restore();
 
-    // --- Draw rounded border around all highlighted area ---
-    // (subtle rounded rect around the highlighted text block, like the reference)
-    if (easedProgress > 0) {
-      // Find the bounding box of highlighted lines
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      accumulated = 0;
-      for (let i = 0; i < lineInfos.length; i++) {
-        const li = lineInfos[i];
-        const lineStart = accumulated;
-        if (revealedLength <= lineStart) break;
-        const lineReveal = Math.min(li.width, revealedLength - lineStart);
-        minX = Math.min(minX, li.x - highlightPaddingX);
-        minY = Math.min(minY, li.y - highlightPaddingY);
-        maxX = Math.max(maxX, li.x + lineReveal + highlightPaddingX);
-        maxY = Math.max(maxY, li.y + li.height + highlightPaddingY);
-        accumulated += li.width;
-      }
-
-      // Rounded border
-      const borderRadius = 12;
-      const bx = minX - 8;
-      const by = minY - 8;
-      const bw = maxX - minX + 16;
-      const bh = maxY - minY + 16;
-
-      ctx.save();
-      ctx.strokeStyle = '#D0D0D0';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.roundRect(bx, by, bw, bh, borderRadius);
-      ctx.stroke();
-      ctx.restore();
-
-      // --- Draw cursor dots ---
-      if (showCursors && easedProgress > 0.01) {
-        // Start cursor: top-left of first line
-        const firstLine = lineInfos[0];
-        const sCursorX = firstLine.x - highlightPaddingX - 8;
-        const sCursorY = firstLine.y - highlightPaddingY - 8;
-
-        ctx.save();
-        ctx.fillStyle = cursorColor;
-        ctx.beginPath();
-        ctx.arc(sCursorX, sCursorY, cursorSize / 2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-
-        // End cursor: bottom-right of current highlight edge
-        // Find the last highlighted line
-        accumulated = 0;
-        let lastHighlightedIdx = 0;
-        let lastLineReveal = 0;
-        for (let i = 0; i < lineInfos.length; i++) {
-          const li = lineInfos[i];
-          const lineStart = accumulated;
-          if (revealedLength <= lineStart) break;
-          lastLineReveal = Math.min(li.width, revealedLength - lineStart);
-          lastHighlightedIdx = i;
-          accumulated += li.width;
-        }
-        const lastLi = lineInfos[lastHighlightedIdx];
-        const eCursorX = lastLi.x + lastLineReveal + highlightPaddingX + 8;
-        const eCursorY = lastLi.y + lastLi.height + highlightPaddingY + 8;
-
-        // Draw connection line from end cursor to border
-        ctx.save();
-        ctx.strokeStyle = cursorColor;
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(sCursorX, sCursorY + cursorSize / 2);
-        ctx.lineTo(sCursorX, by);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(eCursorX, eCursorY - cursorSize / 2);
-        ctx.lineTo(eCursorX, maxY + 8);
-        ctx.stroke();
-        ctx.restore();
-
-        ctx.save();
-        ctx.fillStyle = cursorColor;
-        ctx.beginPath();
-        ctx.arc(eCursorX, eCursorY, cursorSize / 2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      }
-    }
-
-    // --- Draw text on top ---
+    // --- Draw text ---
     ctx.fillStyle = textColor;
     ctx.font = font;
     ctx.textBaseline = 'top';
     for (const li of lineInfos) {
       ctx.fillText(li.text, li.x, li.y);
+    }
+
+    // --- Draw cursor lines and dots (on top of everything) ---
+    if (easedProgress > 0.01) {
+      // Start position: top-left of first highlighted line
+      const firstLine = lineInfos[0];
+      const sCursorX = firstLine.x - highlightPaddingX;
+      const sCursorY = firstLine.y - highlightPaddingY;
+
+      // End position: bottom-right of current highlight edge
+      accumulated = 0;
+      let lastHighlightedIdx = 0;
+      let lastLineReveal = 0;
+      for (let i = 0; i < lineInfos.length; i++) {
+        const li = lineInfos[i];
+        const lineStart = accumulated;
+        if (revealedLength <= lineStart) break;
+        lastLineReveal = Math.min(li.width, revealedLength - lineStart);
+        lastHighlightedIdx = i;
+        accumulated += li.width;
+      }
+      const lastLi = lineInfos[lastHighlightedIdx];
+      const eCursorX = lastLi.x + lastLineReveal + highlightPaddingX;
+      const eCursorY = lastLi.y + lastLi.height + highlightPaddingY;
+
+      // Line runs the full height of the highlight at the edge, like a text caret
+      const highlightH = fontSize * 1.15 + highlightPaddingY * 2;
+      const dotGap = 4; // small gap between line end and dot center
+
+      ctx.save();
+      ctx.strokeStyle = cursorColor;
+      ctx.lineWidth = 1.5;
+
+      // Start line: runs vertically at the left edge of the first highlight,
+      // from dot above down through the highlight height
+      ctx.beginPath();
+      ctx.moveTo(sCursorX, sCursorY - dotGap - cursorSize / 2);
+      ctx.lineTo(sCursorX, sCursorY + highlightH);
+      ctx.stroke();
+
+      // End line: runs vertically at the right edge of the last highlight,
+      // from top of that highlight down to dot below
+      const endLineTop = lastLi.y - highlightPaddingY;
+      ctx.beginPath();
+      ctx.moveTo(eCursorX, endLineTop);
+      ctx.lineTo(eCursorX, eCursorY + dotGap + cursorSize / 2);
+      ctx.stroke();
+      ctx.restore();
+
+      // Dots (toggleable)
+      if (showCursors) {
+        ctx.save();
+        ctx.fillStyle = cursorColor;
+
+        // Start dot: sits above the start line
+        ctx.beginPath();
+        ctx.arc(sCursorX, sCursorY - dotGap - cursorSize / 2, cursorSize / 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // End dot: sits below the end line
+        ctx.beginPath();
+        ctx.arc(eCursorX, eCursorY + dotGap + cursorSize / 2, cursorSize / 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+      }
     }
 
     ctx.restore();

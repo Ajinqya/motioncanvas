@@ -103,6 +103,13 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
       audioEnabled: isAudioAnimation,
     });
 
+    // Remove the fixed pixel display dimensions the player sets on the canvas.
+    // This lets CSS max-width/max-height + the intrinsic aspect ratio handle
+    // responsive scaling without squishing.
+    const canvas = canvasRef.current;
+    canvas.style.width = '';
+    canvas.style.height = '';
+
     // Autoplay on load
     playerRef.current.play();
     setPlaying(true);
@@ -265,8 +272,10 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
         <div className="flex-1 flex items-center justify-center p-4 sm:p-8 overflow-hidden">
           <canvas
             ref={canvasRef}
-            className="max-w-full max-h-full rounded-lg shadow-lg"
+            className="rounded-lg shadow-lg"
             style={{
+              maxWidth: `min(100%, ${definition.width ?? 800}px)`,
+              maxHeight: `min(100%, ${definition.height ?? 600}px)`,
               backgroundColor: definition.background || 'transparent',
             }}
           />

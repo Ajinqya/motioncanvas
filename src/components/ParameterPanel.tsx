@@ -43,6 +43,11 @@ interface SelectParam {
   label?: string;
 }
 
+interface StringParam {
+  value: string;
+  label?: string;
+}
+
 interface FolderParam {
   schema: Record<string, unknown>;
   collapsed?: boolean;
@@ -84,6 +89,17 @@ function isSelectParam(param: unknown): param is SelectParam {
     'value' in param &&
     'options' in param &&
     Array.isArray((param as SelectParam).options)
+  );
+}
+
+function isStringParam(param: unknown): param is StringParam {
+  return (
+    typeof param === 'object' &&
+    param !== null &&
+    'value' in param &&
+    typeof (param as StringParam).value === 'string' &&
+    !(param as ColorParam).value.startsWith('#') &&
+    !('options' in param)
   );
 }
 
@@ -253,6 +269,35 @@ function SelectControl({
   );
 }
 
+// String/text control component
+function StringControl({
+  paramKey,
+  param,
+  value,
+  onChange,
+}: {
+  paramKey: string;
+  param: StringParam;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const label = param.label || formatLabel(paramKey);
+
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs text-muted-foreground">
+        {label}
+      </Label>
+      <Input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-8 text-xs bg-muted border-0"
+      />
+    </div>
+  );
+}
+
 // Folder/section component
 function FolderSection({
   name,
@@ -362,6 +407,19 @@ function ParameterControls({
     if (isSelectParam(param)) {
       return (
         <SelectControl
+          key={key}
+          paramKey={key}
+          param={param}
+          value={(currentValue as string) ?? param.value}
+          onChange={(v) => onChange(key, v)}
+        />
+      );
+    }
+
+    // String parameter (plain text input)
+    if (isStringParam(param)) {
+      return (
+        <StringControl
           key={key}
           paramKey={key}
           param={param}
