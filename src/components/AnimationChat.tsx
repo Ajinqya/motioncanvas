@@ -186,24 +186,33 @@ export function AnimationChat() {
       const data = await response.json();
 
       if (!response.ok) {
-        if (data.error?.includes('API key')) setShowApiKeyInput(true);
+        if (data.error?.includes('API key') || data.error?.includes('api key')) setShowApiKeyInput(true);
         throw new Error(data.error || 'Request failed');
+      }
+
+      // Build reply content — include code snippet in production (no file write)
+      let replyContent = data.reply || data.description || 'Animation created!';
+      const hasPath = !!data.path; // path is only set when file was written (dev server)
+
+      if (data.success && data.code && !hasPath) {
+        // Production mode: show description + note that this is preview-only
+        replyContent = `${data.description || 'Generated animation!'}\n\n💡 To add this to your gallery, run the dev server locally and use the chat there. The animation code has been generated successfully.`;
       }
 
       const assistantMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: data.reply || data.description || 'Animation created!',
+        content: replyContent,
         animationId: data.success ? data.id : undefined,
-        animationPath: data.success ? data.path : undefined,
+        animationPath: hasPath ? data.path : undefined,
         animationName: data.success ? data.name : undefined,
         isError: !data.success,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
 
-      // Auto-switch to iterate mode on the new/updated animation
-      if (data.success && data.id) {
+      // Auto-switch to iterate mode on the new/updated animation (dev server only)
+      if (data.success && data.id && hasPath) {
         fetch('/api/animations-list')
           .then((res) => res.json())
           .then((list: AnimationInfo[]) => {
