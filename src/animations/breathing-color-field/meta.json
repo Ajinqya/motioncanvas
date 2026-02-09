@@ -1,0 +1,21 @@
+{
+  "id": "breathing-color-field",
+  "name": "Breathing Color Field",
+  "createdAt": "2026-02-09T00:00:00.000Z",
+  "updatedAt": "2026-02-09T00:00:00.000Z",
+  "source": {
+    "type": "none",
+    "notes": "Soft radial gradient blobs that expand and contract in a gentle breathing rhythm, blending additively into a living color field"
+  },
+  "prompt": "Breathing Color Field - Gradient subtly expands and contracts",
+  "tags": [
+    "gradient",
+    "breathing",
+    "ambient",
+    "organic",
+    "color",
+    "loop",
+    "dark",
+    "background"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "id": "particle-float",
+  "name": "Particle Float",
+  "createdAt": "2026-02-08T00:00:00.000Z",
+  "updatedAt": "2026-02-08T00:00:00.000Z",
+  "source": {
+    "type": "none",
+    "notes": "Floating particle background with subtle connecting lines"
+  },
+  "prompt": "Create a particle float background animation with gently drifting particles connected by proximity lines, glowing cores, and a deep dark background.",
+  "tags": [
+    "background",
+    "particles",
+    "float",
+    "ambient",
+    "network",
+    "constellation",
+    "glow"
+  ]
+}

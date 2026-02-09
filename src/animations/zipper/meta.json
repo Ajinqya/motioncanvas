@@ -1,0 +1,21 @@
+{
+  "id": "zipper",
+  "name": "Zipper",
+  "createdAt": "2026-02-08T00:00:00.000Z",
+  "updatedAt": "2026-02-08T17:30:48.605Z",
+  "source": {
+    "type": "screenshot",
+    "notes": "Inspired by a 3D render of a zipper on olive leather with a ZIP file icon pull tab"
+  },
+  "prompt": "A zipper that opens and closes with metallic teeth, leather tape, stitching, and a ZIP document pull tab",
+  "tags": [
+    "zipper",
+    "mechanical",
+    "leather",
+    "metallic",
+    "loop",
+    "satisfying",
+    "texture",
+    "open-close"
+  ]
+}

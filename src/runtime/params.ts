@@ -24,6 +24,11 @@ export function string(opts: { value: string; label?: string }) {
   return opts;
 }
 
+/** Create a text/multiline string parameter */
+export function text(opts: { value: string; label?: string; multiline?: boolean }) {
+  return opts;
+}
+
 /** Create a select/dropdown parameter */
 export function select(opts: {
   value: string;

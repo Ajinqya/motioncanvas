@@ -1,0 +1,21 @@
+{
+  "id": "followers-trend",
+  "name": "Followers Trend",
+  "createdAt": "2026-02-09",
+  "updatedAt": "2026-02-08T20:38:20.469Z",
+  "source": {
+    "type": "screenshot",
+    "notes": "Recreated from a followers trend card UI screenshot showing a bar chart with tooltip, cursor interaction, and stat counters"
+  },
+  "prompt": "Create an animation matching a Followers Trend card with pink background, growing bar chart (Feb-Jun), animated cursor with tooltip showing 453, and bottom stats showing Total Followers 587 and New Followers 116",
+  "tags": [
+    "dashboard",
+    "chart",
+    "stats",
+    "social",
+    "followers",
+    "bar-chart",
+    "ui-card",
+    "pink"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "id": "curved-text-scroll",
+  "name": "Curved Text Scroll",
+  "createdAt": "2026-02-09T00:00:00.000Z",
+  "updatedAt": "2026-02-09T00:00:00.000Z",
+  "source": {
+    "type": "screenshot",
+    "notes": "Inspired by Clueso Social — city names on a circular path with fixed dot indentation"
+  },
+  "prompt": "City names arranged on a vertical circle (like a wheel). The wheel rotates to scroll text. Each line is rotated to follow the tangent of the circle, creating a curved text effect. A fixed blue dot stays in place; only the single item directly in front of the dot gets indented outward.",
+  "tags": [
+    "text",
+    "scroll",
+    "circular",
+    "curved",
+    "cities",
+    "loop",
+    "perspective",
+    "indent",
+    "dot",
+    "typography"
+  ]
+}

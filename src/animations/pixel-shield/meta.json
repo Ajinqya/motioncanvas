@@ -1,0 +1,20 @@
+{
+  "id": "pixel-shield",
+  "name": "Pixel Shield",
+  "createdAt": "2026-02-08",
+  "updatedAt": "2026-02-08T18:46:35.281Z",
+  "source": {
+    "type": "screenshot",
+    "notes": "Based on reference image of glowing pixel shield on dark background"
+  },
+  "prompt": "Make a pixel security shield and animate the pixels",
+  "tags": [
+    "security",
+    "shield",
+    "pixel",
+    "grid",
+    "glow",
+    "cyber",
+    "protection"
+  ]
+}

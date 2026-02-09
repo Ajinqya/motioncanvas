@@ -36,7 +36,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Trash2, Copy, Check, Plus, FolderInput, MoreVertical, Save } from 'lucide-react';
+import { Trash2, Copy, Check, Plus, FolderInput, MoreVertical, Save, Clapperboard } from 'lucide-react';
 import { toast } from 'sonner';
 
 function getAnimationId(entry: { definition: any }) {
@@ -89,6 +89,18 @@ export function Gallery() {
     return visibleAnimations.filter((entry) => getAnimationTab(getAnimationId(entry)) === selectedTabId);
   }, [visibleAnimations, selectedTabId, getAnimationTab]);
 
+  // ── Tab counts ──────────────────────────────────────────────
+  const tabCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: visibleAnimations.length };
+    for (const entry of visibleAnimations) {
+      const tabId = getAnimationTab(getAnimationId(entry));
+      if (tabId) {
+        counts[tabId] = (counts[tabId] || 0) + 1;
+      }
+    }
+    return counts;
+  }, [visibleAnimations, getAnimationTab]);
+
   // ── Handlers ─────────────────────────────────────────────────
   const handleCopyCode = async (e: React.MouseEvent, entry: typeof animations[0]) => {
     e.preventDefault();
@@ -112,9 +124,35 @@ export function Gallery() {
     setDeleteDialogOpen(true);
   };
 
-  const confirmDelete = () => {
-    if (animationToDelete) {
+  const [deleting, setDeleting] = useState(false);
+
+  const confirmDelete = async () => {
+    if (!animationToDelete) return;
+
+    setDeleting(true);
+    try {
+      const res = await fetch('/api/delete-animation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: animationToDelete.id }),
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        // Also hide it locally in case HMR hasn't reloaded yet
+        deleteAnimation(animationToDelete.id);
+        toast.success(`Deleted "${animationToDelete.name}" — source files removed`);
+      } else {
+        // Fallback: if API fails (e.g. production build), still hide locally
+        deleteAnimation(animationToDelete.id);
+        toast.error(`Couldn't delete source files: ${data.error || 'unknown error'}. Hidden from gallery instead.`);
+      }
+    } catch {
+      // Network error or no dev server — still hide locally
       deleteAnimation(animationToDelete.id);
+      toast.error('Dev server not available — animation hidden but source files not deleted.');
+    } finally {
+      setDeleting(false);
       setDeleteDialogOpen(false);
       setAnimationToDelete(null);
     }
@@ -232,11 +270,19 @@ export function Gallery() {
   // ── Render ───────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-background">
-      <div className="sticky top-0 z-50 w-full bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <div className="sticky top-0 z-50 w-full bg-background">
         <header className="border-b">
           <div className="container mx-auto px-6 py-4 flex items-center justify-between">
             <h1 className="text-xl font-semibold tracking-tight">Canvas Animation Lab</h1>
-            <ThemeToggle />
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/compose">
+                  <Clapperboard className="h-4 w-4" />
+                  <span className="hidden sm:inline">Compose</span>
+                </Link>
+              </Button>
+              <ThemeToggle />
+            </div>
           </div>
         </header>
 
@@ -265,6 +311,9 @@ export function Gallery() {
                   }`}
                 >
                   {tab.name}
+                  <span className="ml-1.5 text-xs text-muted-foreground tabular-nums">
+                    {tabCounts[tab.id] ?? 0}
+                  </span>
                 </Button>
               );
             })}
@@ -443,12 +492,14 @@ export function Gallery() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Animation</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete "{animationToDelete?.name}"? This action cannot be undone.
+              Are you sure you want to delete "{animationToDelete?.name}"? This will permanently remove its source code from disk. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete}>Delete</AlertDialogAction>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} disabled={deleting}>
+              {deleting ? 'Deleting...' : 'Delete permanently'}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

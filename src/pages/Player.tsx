@@ -11,7 +11,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Slider } from '@/components/ui/slider';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Play, Pause, RotateCcw, Save, Download, Settings2, X, Music, Upload } from 'lucide-react';
+import { ArrowLeft, ArrowLeftRight, Play, Pause, RotateCcw, Save, Download, Settings2, X, Music, Upload, Mic, MicOff } from 'lucide-react';
 
 export function Player() {
   const { id } = useParams<{ id: string }>();
@@ -70,6 +70,9 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [audioLoaded, setAudioLoaded] = useState(false);
   const [audioFileName, setAudioFileName] = useState<string | null>(null);
+  const [audioSource, setAudioSource] = useState<'none' | 'file' | 'microphone'>('none');
+  const [micError, setMicError] = useState<string | null>(null);
+  const [pingPong, setPingPong] = useState(false);
 
   const { definition } = entry;
   const isSimple = isSimpleAnimation(definition);
@@ -118,6 +121,8 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
       playerRef.current?.destroy();
       setAudioLoaded(false);
       setAudioFileName(null);
+      setAudioSource('none');
+      setMicError(null);
     };
   }, [definition, isAudioAnimation]);
 
@@ -125,6 +130,11 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
   useEffect(() => {
     playerRef.current?.setParams(params);
   }, [params]);
+
+  // Sync ping-pong mode with the player
+  useEffect(() => {
+    playerRef.current?.setPingPong(pingPong);
+  }, [pingPong]);
 
   const togglePlay = () => {
     playerRef.current?.toggle();
@@ -150,6 +160,8 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
       await playerRef.current.loadAudio(file);
       setAudioLoaded(true);
       setAudioFileName(file.name);
+      setAudioSource('file');
+      setMicError(null);
     } catch (error) {
       console.error('Failed to load audio:', error);
       setAudioLoaded(false);
@@ -159,6 +171,31 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
     // Reset input so the same file can be selected again
     if (audioInputRef.current) {
       audioInputRef.current.value = '';
+    }
+  };
+
+  const handleToggleMicrophone = async () => {
+    if (!playerRef.current) return;
+    
+    if (audioSource === 'microphone') {
+      // Turn off mic
+      playerRef.current.unloadMicrophone();
+      setAudioSource('none');
+      setMicError(null);
+    } else {
+      // Turn on mic
+      try {
+        await playerRef.current.loadMicrophone();
+        setAudioSource('microphone');
+        setAudioLoaded(false);
+        setAudioFileName(null);
+        setMicError(null);
+      } catch (error) {
+        console.error('Failed to access microphone:', error);
+        setMicError(error instanceof DOMException && error.name === 'NotAllowedError' 
+          ? 'Microphone access denied' 
+          : 'Could not access microphone');
+      }
     }
   };
 
@@ -197,7 +234,7 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
       {/* Sticky header */}
-      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 flex-shrink-0">
+      <header className="sticky top-0 z-40 border-b bg-background flex-shrink-0">
         <div className="container mx-auto px-4 py-3 sm:py-4 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
             <Button variant="ghost" size="icon" asChild className="flex-shrink-0">
@@ -208,7 +245,7 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
             <h1 className="text-lg sm:text-2xl font-bold truncate">{definition.name}</h1>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            {/* Audio upload for audio-reactive animations */}
+            {/* Audio source controls for audio-reactive animations */}
             {isAudioAnimation && (
               <>
                 <input
@@ -219,13 +256,25 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
                   className="hidden"
                 />
                 <Button
-                  variant={audioLoaded ? 'default' : 'outline'}
+                  variant={audioSource === 'file' ? 'default' : 'outline'}
                   onClick={() => audioInputRef.current?.click()}
                   className="hidden sm:flex"
+                  title="Load audio file"
                 >
-                  {audioLoaded ? <Music className="h-4 w-4" /> : <Upload className="h-4 w-4" />}
+                  {audioSource === 'file' ? <Music className="h-4 w-4" /> : <Upload className="h-4 w-4" />}
                   <span className="hidden md:inline ml-2">
-                    {audioLoaded ? audioFileName : 'Load Audio'}
+                    {audioSource === 'file' ? audioFileName : 'Load Audio'}
+                  </span>
+                </Button>
+                <Button
+                  variant={audioSource === 'microphone' ? 'default' : 'outline'}
+                  onClick={handleToggleMicrophone}
+                  className="hidden sm:flex"
+                  title={audioSource === 'microphone' ? 'Stop microphone' : 'Use microphone'}
+                >
+                  {audioSource === 'microphone' ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+                  <span className="hidden md:inline ml-2">
+                    {audioSource === 'microphone' ? 'Mic On' : 'Use Mic'}
                   </span>
                 </Button>
               </>
@@ -314,14 +363,27 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
           {/* Mobile action buttons */}
           <div className="lg:hidden p-4 border-b space-y-2">
             {isAudioAnimation && (
-              <Button
-                variant={audioLoaded ? 'default' : 'outline'}
-                onClick={() => audioInputRef.current?.click()}
-                className="w-full"
-              >
-                {audioLoaded ? <Music className="h-4 w-4 mr-2" /> : <Upload className="h-4 w-4 mr-2" />}
-                {audioLoaded ? audioFileName : 'Load Audio'}
-              </Button>
+              <>
+                <Button
+                  variant={audioSource === 'file' ? 'default' : 'outline'}
+                  onClick={() => audioInputRef.current?.click()}
+                  className="w-full"
+                >
+                  {audioSource === 'file' ? <Music className="h-4 w-4 mr-2" /> : <Upload className="h-4 w-4 mr-2" />}
+                  {audioSource === 'file' ? audioFileName : 'Load Audio'}
+                </Button>
+                <Button
+                  variant={audioSource === 'microphone' ? 'default' : 'outline'}
+                  onClick={handleToggleMicrophone}
+                  className="w-full"
+                >
+                  {audioSource === 'microphone' ? <Mic className="h-4 w-4 mr-2" /> : <MicOff className="h-4 w-4 mr-2" />}
+                  {audioSource === 'microphone' ? 'Mic On — Tap to Stop' : 'Use Microphone'}
+                </Button>
+                {micError && (
+                  <p className="text-xs text-destructive">{micError}</p>
+                )}
+              </>
             )}
             {!isSimple && (
               <Button
@@ -395,7 +457,7 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
       </div>
 
       {/* Player controls - full width at bottom */}
-      <div className="flex-shrink-0 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-30">
+      <div className="flex-shrink-0 border-t bg-background z-30">
         <div className="px-4 sm:px-6 py-3 sm:py-4">
           <div className="flex items-center gap-2 sm:gap-4">
             <Button
@@ -413,6 +475,15 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
               className="flex-shrink-0"
             >
               <RotateCcw className="h-4 w-4" />
+            </Button>
+            <Button
+              variant={pingPong ? 'default' : 'outline'}
+              size="icon"
+              onClick={() => setPingPong(!pingPong)}
+              className="flex-shrink-0"
+              title={pingPong ? 'Ping-pong: ON (0→100%→0)' : 'Ping-pong: OFF (0→100% loop)'}
+            >
+              <ArrowLeftRight className="h-4 w-4" />
             </Button>
 
             {durationSec && (

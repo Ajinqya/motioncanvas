@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Gallery } from './pages/Gallery';
 import { Player } from './pages/Player';
+import { Composer } from './pages/Composer';
 import { ThemeProvider } from './components/theme-provider';
 import { AnimationChat } from './components/AnimationChat';
 import { Toaster } from 'sonner';
@@ -13,6 +14,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Gallery />} />
           <Route path="/a/:id" element={<Player />} />
+          <Route path="/compose" element={<Composer />} />
         </Routes>
         <AnimationChat />
       </BrowserRouter>

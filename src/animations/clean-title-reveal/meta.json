@@ -1,0 +1,21 @@
+{
+  "id": "clean-title-reveal",
+  "name": "Clean Title Reveal",
+  "createdAt": "2026-02-09T00:00:00.000Z",
+  "updatedAt": "2026-02-08T19:27:55.408Z",
+  "source": {
+    "type": "none",
+    "notes": "Baseline workhorse title animation — fade + vertical slide + blur sharpen"
+  },
+  "prompt": "Clean Title Reveal: fade + vertical slide + subtle blur sharpen. Params: direction (up/down), duration, stagger letters or words, blur amount.",
+  "tags": [
+    "title",
+    "text",
+    "reveal",
+    "fade",
+    "blur",
+    "slide",
+    "typography",
+    "workhorse"
+  ]
+}

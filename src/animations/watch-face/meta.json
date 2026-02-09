@@ -1,0 +1,12 @@
+{
+  "id": "watch-face",
+  "name": "Watch Face",
+  "createdAt": "2026-02-08",
+  "updatedAt": "2026-02-08",
+  "source": {
+    "type": "screenshot",
+    "notes": "Based on a yellow analog clock reference image with white hands and markers"
+  },
+  "prompt": "Create a watch face animation with a yellow background, hour/minute numbers, white rounded markers, and an animated sweeping seconds hand. Static hour/minute hands at 10:10 position.",
+  "tags": ["clock", "watch", "time", "analog", "seconds", "yellow", "minimal"]
+}

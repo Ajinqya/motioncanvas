@@ -20,15 +20,27 @@ export interface AudioData {
   isBeat: boolean;
 }
 
+export type AudioSourceType = 'none' | 'file' | 'microphone';
+
 export interface AudioAnalyzer {
   /** Load an audio file */
   load(file: File | string): Promise<void>;
+  /** Start capturing from device microphone */
+  loadMicrophone(): Promise<void>;
+  /** Stop microphone capture and clean up mic resources */
+  unloadMicrophone(): void;
+  /** Check if microphone is currently active */
+  isMicrophoneActive(): boolean;
+  /** Get current audio source type */
+  getSourceType(): AudioSourceType;
   /** Start playback */
   play(): void;
   /** Pause playback */
   pause(): void;
   /** Seek to time in seconds */
   seek(time: number): void;
+  /** Set whether the audio element should loop (for sequence sync) */
+  setLoop(loop: boolean): void;
   /** Get current playback time in seconds */
   getTime(): number;
   /** Get audio duration in seconds */
@@ -51,6 +63,11 @@ export function createAudioAnalyzer(): AudioAnalyzer {
   let analyser: AnalyserNode | null = null;
   let sourceNode: MediaElementAudioSourceNode | null = null;
   let audioElement: HTMLAudioElement | null = null;
+  
+  // Microphone state
+  let micStream: MediaStream | null = null;
+  let micSourceNode: MediaStreamAudioSourceNode | null = null;
+  let currentSourceType: AudioSourceType = 'none';
   
   // Analysis buffers
   let frequencyData = new Uint8Array(0);
@@ -80,19 +97,40 @@ export function createAudioAnalyzer(): AudioAnalyzer {
     analyser.connect(audioContext.destination);
   }
   
-  async function load(file: File | string): Promise<void> {
-    initAudioContext();
-    
-    // Clean up existing audio
+  /** Clean up file-based audio source */
+  function cleanupFileSource() {
     if (sourceNode) {
       sourceNode.disconnect();
       sourceNode = null;
     }
     if (audioElement) {
       audioElement.pause();
+      if (audioElement.src.startsWith('blob:')) {
+        URL.revokeObjectURL(audioElement.src);
+      }
       audioElement.src = '';
       audioElement = null;
     }
+  }
+  
+  /** Clean up microphone source */
+  function cleanupMicSource() {
+    if (micSourceNode) {
+      micSourceNode.disconnect();
+      micSourceNode = null;
+    }
+    if (micStream) {
+      micStream.getTracks().forEach(track => track.stop());
+      micStream = null;
+    }
+  }
+  
+  async function load(file: File | string): Promise<void> {
+    initAudioContext();
+    
+    // Clean up any existing sources
+    cleanupMicSource();
+    cleanupFileSource();
     
     // Create new audio element
     audioElement = new Audio();
@@ -118,6 +156,67 @@ export function createAudioAnalyzer(): AudioAnalyzer {
       sourceNode = audioContext.createMediaElementSource(audioElement);
       sourceNode.connect(analyser);
     }
+    
+    currentSourceType = 'file';
+  }
+  
+  async function loadMicrophone(): Promise<void> {
+    initAudioContext();
+    
+    // Clean up any existing sources
+    cleanupFileSource();
+    cleanupMicSource();
+    
+    // Disconnect analyser from destination to prevent feedback
+    // (we only want to analyze mic input, not play it back through speakers)
+    if (analyser) {
+      analyser.disconnect();
+    }
+    
+    // Request microphone access
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+    
+    // Resume audio context if suspended (required after user gesture)
+    if (audioContext?.state === 'suspended') {
+      await audioContext.resume();
+    }
+    
+    // Connect mic stream to analyser (NOT to destination - avoids feedback)
+    if (audioContext && analyser) {
+      micSourceNode = audioContext.createMediaStreamSource(micStream);
+      micSourceNode.connect(analyser);
+    }
+    
+    currentSourceType = 'microphone';
+  }
+  
+  function unloadMicrophone(): void {
+    cleanupMicSource();
+    
+    // Re-connect analyser to destination for file playback
+    if (analyser && audioContext) {
+      try {
+        analyser.connect(audioContext.destination);
+      } catch {
+        // Already connected or context closed
+      }
+    }
+    
+    currentSourceType = 'none';
+  }
+  
+  function isMicrophoneActive(): boolean {
+    return currentSourceType === 'microphone' && micStream !== null;
+  }
+  
+  function getSourceType(): AudioSourceType {
+    return currentSourceType;
   }
   
   function play(): void {
@@ -135,6 +234,10 @@ export function createAudioAnalyzer(): AudioAnalyzer {
     if (audioElement) {
       audioElement.currentTime = Math.max(0, Math.min(time, audioElement.duration || 0));
     }
+  }
+
+  function setLoop(loop: boolean): void {
+    if (audioElement) audioElement.loop = loop;
   }
   
   function getTime(): number {
@@ -192,7 +295,7 @@ export function createAudioAnalyzer(): AudioAnalyzer {
       isBeat: false,
     };
     
-    if (!analyser || !audioElement) {
+    if (!analyser || (currentSourceType === 'file' && !audioElement) || currentSourceType === 'none') {
       return emptyData;
     }
     
@@ -241,32 +344,28 @@ export function createAudioAnalyzer(): AudioAnalyzer {
   }
   
   function destroy(): void {
-    if (sourceNode) {
-      sourceNode.disconnect();
-      sourceNode = null;
-    }
-    if (audioElement) {
-      audioElement.pause();
-      if (audioElement.src.startsWith('blob:')) {
-        URL.revokeObjectURL(audioElement.src);
-      }
-      audioElement.src = '';
-      audioElement = null;
-    }
+    cleanupFileSource();
+    cleanupMicSource();
     if (audioContext) {
       audioContext.close();
       audioContext = null;
     }
     analyser = null;
+    currentSourceType = 'none';
     frequencyData = new Uint8Array(0);
     waveformData = new Uint8Array(0);
   }
   
   return {
     load,
+    loadMicrophone,
+    unloadMicrophone,
+    isMicrophoneActive,
+    getSourceType,
     play,
     pause,
     seek,
+    setLoop,
     getTime,
     getDuration,
     isPlaying,

@@ -8,7 +8,7 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
+        sans: ['GeistPixelCircle', 'ui-monospace', 'SFMono-Regular', 'monospace'],
       },
       borderRadius: {
         lg: 'var(--radius)',

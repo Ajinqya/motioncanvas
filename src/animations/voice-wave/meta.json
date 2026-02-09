@@ -1,0 +1,20 @@
+{
+  "id": "voice-wave",
+  "name": "Voice Wave",
+  "createdAt": "2026-02-08T00:00:00.000Z",
+  "updatedAt": "2026-02-08T17:26:03.877Z",
+  "source": {
+    "type": "screenshot",
+    "notes": "Dark audio message card with animated waveform bars, speaker name, status, timer, and play button"
+  },
+  "prompt": "Animate the voice wave from the reference image showing a dark card with Sally Peterson speaking, waveform bars, timer, and play button",
+  "tags": [
+    "audio",
+    "voice",
+    "waveform",
+    "message",
+    "ui",
+    "card",
+    "dark"
+  ]
+}

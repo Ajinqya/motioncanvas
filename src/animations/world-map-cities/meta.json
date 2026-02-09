@@ -1,0 +1,17 @@
+{
+  "id": "world-map-cities",
+  "name": "World Map — City Highlights",
+  "createdAt": "2026-02-09",
+  "source": "custom",
+  "prompt": "Premium world map animation that highlights all major cities one by one with glowing dots, pulsing rings, curved connections, and staggered label reveals on a dot-matrix map background.",
+  "tags": [
+    "map",
+    "cities",
+    "world",
+    "glow",
+    "stagger",
+    "premium",
+    "data-viz"
+  ],
+  "updatedAt": "2026-02-08T20:06:51.375Z"
+}

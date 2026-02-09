@@ -1,0 +1,20 @@
+{
+  "id": "verified-badge",
+  "name": "Verified Badge",
+  "createdAt": "2026-02-08",
+  "updatedAt": "2026-02-08T17:15:01.857Z",
+  "source": {
+    "type": "screenshot",
+    "notes": "Green verified badge with scalloped border, trim-path checkmark, and pulsing rings"
+  },
+  "prompt": "Animate a check box using trim paths and then make the outer zigzag container rotate while the checkbox is still in the center, fixed.",
+  "tags": [
+    "badge",
+    "checkmark",
+    "verified",
+    "trim-path",
+    "rotation",
+    "green",
+    "pulse"
+  ]
+}

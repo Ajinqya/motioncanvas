@@ -623,6 +623,57 @@ export function saveDefaultsPlugin(): Plugin {
         });
       });
 
+      // API: Delete animation (remove source files from disk)
+      server.middlewares.use('/api/delete-animation', async (req, res) => {
+        if (req.method !== 'POST') {
+          res.statusCode = 405;
+          res.end('Method not allowed');
+          return;
+        }
+
+        let body = '';
+        req.on('data', (chunk: string) => {
+          body += chunk.toString();
+        });
+
+        req.on('end', () => {
+          try {
+            const { id } = JSON.parse(body);
+
+            if (!id) {
+              res.statusCode = 400;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ error: 'Missing animation id' }));
+              return;
+            }
+
+            // Sanitize the id to prevent path traversal
+            const cleanId = id.replace(/[^a-z0-9-]/gi, '-').toLowerCase();
+            const animationDir = path.join(process.cwd(), 'src', 'animations', cleanId);
+
+            if (!fs.existsSync(animationDir)) {
+              res.statusCode = 404;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ error: `Animation "${cleanId}" not found on disk` }));
+              return;
+            }
+
+            // Recursively delete the animation directory
+            fs.rmSync(animationDir, { recursive: true, force: true });
+
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ success: true, id: cleanId, message: `Deleted animation "${cleanId}" from disk` }));
+          } catch (error) {
+            res.statusCode = 500;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({
+              error: error instanceof Error ? error.message : 'Unknown error',
+            }));
+          }
+        });
+      });
+
       // API: Get tab organisation defaults from disk
       const tabDefaultsPath = path.join(process.cwd(), 'tab-organization.json');
 

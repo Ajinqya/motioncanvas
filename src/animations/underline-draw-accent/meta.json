@@ -1,0 +1,20 @@
+{
+  "id": "underline-draw-accent",
+  "name": "Underline Draw Accent",
+  "createdAt": "2026-02-09",
+  "updatedAt": "2026-02-08T19:32:36.159Z",
+  "source": {
+    "type": "none",
+    "notes": "Underline draws beneath text with a spring-like bounce overshoot settle."
+  },
+  "prompt": "Underline draws + slight bounce settle. Great for emphasizing key words.",
+  "tags": [
+    "text",
+    "underline",
+    "accent",
+    "emphasis",
+    "bounce",
+    "typography",
+    "motion"
+  ]
+}

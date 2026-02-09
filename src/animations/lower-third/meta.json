@@ -1,0 +1,20 @@
+{
+  "id": "lower-third",
+  "name": "Lower Third",
+  "createdAt": "2026-02-08T00:00:00.000Z",
+  "updatedAt": "2026-02-08T16:01:25.097Z",
+  "source": {
+    "type": "none",
+    "notes": "Clean premium lower third with staggered title, subtitle, and accent line animation."
+  },
+  "prompt": "Clean and premium lower third animation with title and subtitle.",
+  "tags": [
+    "lower-third",
+    "title",
+    "subtitle",
+    "text",
+    "overlay",
+    "broadcast",
+    "motion-graphics"
+  ]
+}

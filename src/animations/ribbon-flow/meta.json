@@ -1,0 +1,20 @@
+{
+  "id": "ribbon-flow",
+  "name": "Ribbon Flow Lines",
+  "createdAt": "2026-02-09",
+  "updatedAt": "2026-02-08T19:25:29.865Z",
+  "source": {
+    "type": "none",
+    "notes": "Soft flowing curved ribbon lines with multi-layered sine waves"
+  },
+  "prompt": "Soft flowing curved lines — multiple ribbon-like paths undulating across the canvas with layered sine waves, glow effects, and a three-color gradient palette.",
+  "tags": [
+    "lines",
+    "flow",
+    "ribbon",
+    "curves",
+    "organic",
+    "ambient",
+    "abstract"
+  ]
+}

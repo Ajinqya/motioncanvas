@@ -1,0 +1,20 @@
+{
+  "id": "ball-portal",
+  "name": "Ball Portal",
+  "createdAt": "2026-02-08",
+  "updatedAt": "2026-02-08T18:47:57.446Z",
+  "source": {
+    "type": "screenshot",
+    "notes": "Ball bouncing through a portal with concentric elliptical rings"
+  },
+  "prompt": "Create a ball bouncing animation along with a portal that gives the illusion of real physics. The ball rises out of a portal made of concentric cyan rings, bounces to a peak, then falls back through the portal.",
+  "tags": [
+    "physics",
+    "bounce",
+    "portal",
+    "ball",
+    "rings",
+    "glow",
+    "3d-illusion"
+  ]
+}

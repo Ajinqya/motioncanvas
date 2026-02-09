@@ -1,0 +1,19 @@
+{
+  "id": "logo-grid-reveal",
+  "name": "Logo Grid Reveal",
+  "createdAt": "2026-02-09",
+  "updatedAt": "2026-02-08T19:49:59.130Z",
+  "source": {
+    "type": "none",
+    "notes": "SVG logo construction grid — premium reveal animation"
+  },
+  "prompt": "Animate this SVG logo construction grid in a premium way with grid lines, construction circles, anchor dots, diagonal wipe logo fill, border trace, vignette, and ambient glow.",
+  "tags": [
+    "logo",
+    "grid",
+    "reveal",
+    "construction",
+    "premium",
+    "dark"
+  ]
+}

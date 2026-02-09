@@ -1,0 +1,8 @@
+{
+  "id": "map-convergence",
+  "name": "Map Convergence",
+  "createdAt": "2026-02-09T00:00:00.000Z",
+  "source": "custom",
+  "prompt": "Map animation with glowing lines from multiple paths approaching a blue location dot. Once all lines reach the dot, it ripples. Dark background with street grid pattern similar to map style.",
+  "tags": ["map", "location", "paths", "convergence", "glow", "ripple", "navigation"]
+}

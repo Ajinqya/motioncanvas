@@ -1,0 +1,23 @@
+{
+  "id": "candle-flame",
+  "name": "Candle Flame",
+  "createdAt": "2026-02-08T00:00:00.000Z",
+  "updatedAt": "2026-02-08T17:10:13.121Z",
+  "source": {
+    "type": "screenshot",
+    "notes": "Inspired by moody candlelight photography with deep blue tones and pink/magenta flame"
+  },
+  "prompt": "Realistic candle flame animation with flickering, swaying motion, warm glow halo, layered flame gradients (blue outer, coral mid, pink/white core), cylindrical blue candle body with 3D lighting, and film grain texture on a deep navy background",
+  "tags": [
+    "candle",
+    "flame",
+    "fire",
+    "moody",
+    "atmospheric",
+    "glow",
+    "flicker",
+    "warm",
+    "grain",
+    "dark"
+  ]
+}

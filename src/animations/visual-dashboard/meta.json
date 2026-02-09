@@ -1,0 +1,19 @@
+{
+  "id": "visual-dashboard",
+  "name": "Visual Dashboard",
+  "createdAt": "2026-02-08",
+  "updatedAt": "2026-02-08T16:26:41.699Z",
+  "source": {
+    "type": "screenshot",
+    "notes": "Recreated from visual.study mobile dashboard design"
+  },
+  "prompt": "Recreate this mobile dashboard screen and animate the items - pixel font numbers, bar chart, quarter-arc curve, and info cards with staggered entrance animations",
+  "tags": [
+    "dashboard",
+    "ui",
+    "mobile",
+    "pixel-font",
+    "data-viz",
+    "minimal"
+  ]
+}

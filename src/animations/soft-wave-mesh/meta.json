@@ -1,0 +1,21 @@
+{
+  "id": "soft-wave-mesh",
+  "name": "Soft Wave Mesh",
+  "createdAt": "2026-02-09T00:00:00.000Z",
+  "updatedAt": "2026-02-08T19:27:06.110Z",
+  "source": {
+    "type": "none",
+    "notes": "Premium soft wave mesh background with grid-based sine distortion and gradient overlay"
+  },
+  "prompt": "Soft Wave Mesh Background - Grid-based sine distortion with premium feel and zero distraction",
+  "tags": [
+    "background",
+    "mesh",
+    "wave",
+    "grid",
+    "premium",
+    "gradient",
+    "ambient",
+    "loop"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "id": "speedo-bar",
+  "name": "Speedo Bar",
+  "createdAt": "2026-02-08T00:00:00.000Z",
+  "updatedAt": "2026-02-08T18:14:29.327Z",
+  "source": {
+    "type": "screenshot",
+    "notes": "Inspired by automotive speedometer with RPM glow and gear shift animation"
+  },
+  "prompt": "Speedometer animation with gear shifts shown, RPM-driven inner circle scaling that bounces on gear shift. 6 gears starting from 0, top speed 160 MP/H.",
+  "tags": [
+    "speedometer",
+    "gauge",
+    "automotive",
+    "rpm",
+    "gears",
+    "glow",
+    "dashboard"
+  ]
+}

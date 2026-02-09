@@ -29,12 +29,12 @@ const animation: AnimationDefinition<SyncingDotsParams> = {
   params: {
     defaults: {
       scale: 1,
-      primaryColor: '#1A1A1A',
+      primaryColor: '#363636',
       backgroundColor: '#F0F0F0',
-      pillColor: '#FFFFFF',
-      labelText: 'Syncing',
-      speed: 1,
-      dotCount: 8,
+      pillColor: '#ffffff',
+      labelText: 'Rotate',
+      speed: 0.3,
+      dotCount: 6,
       iconSize: 28,
     },
     schema: {

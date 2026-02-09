@@ -1,0 +1,16 @@
+{
+  "id": "type-reveal",
+  "name": "Type Reveal",
+  "createdAt": "2026-02-09",
+  "source": "custom",
+  "prompt": "Create a type reveal animation with premium soft masked reveals per word or chunk, featuring gradient masking, glow effects, and smooth transitions",
+  "tags": [
+    "text",
+    "reveal",
+    "typography",
+    "premium",
+    "mask",
+    "gradient"
+  ],
+  "updatedAt": "2026-02-08T19:33:40.420Z"
+}
