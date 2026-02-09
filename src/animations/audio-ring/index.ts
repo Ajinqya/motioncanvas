@@ -35,6 +35,7 @@ const animation: AnimationDefinition<AudioRingParams> = {
   width: 500,
   height: 500,
   background: '#0a0a0f',
+  audioReactive: true,
 
   params: {
     defaults: {

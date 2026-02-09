@@ -75,6 +75,12 @@ export interface AnimationDefinition<P = Record<string, unknown>> {
   width?: number;
   /** Canvas height (default: 600) */
   height?: number;
+  /**
+   * When true, this animation uses audio data (ctx.audio) for visualization.
+   * In the standalone player, this enables the audio controls (file upload / mic).
+   * In the sequence composer, this allows binding to an audio clip on the timeline.
+   */
+  audioReactive?: boolean;
   /** Parameter configuration */
   params: {
     /** Default parameter values */

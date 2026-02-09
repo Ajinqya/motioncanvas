@@ -81,7 +81,9 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
     : undefined;
   
   // Check if this is an audio-reactive animation
-  const isAudioAnimation = entry.meta?.tags?.includes('audio') || 
+  const isAudioAnimation = 
+    (!isSimple && (definition as any).audioReactive) ||
+    entry.meta?.tags?.includes('audio') || 
     (!isSimple && definition.id?.startsWith('audio-'));
 
   // Use our custom parameter hook (only for full format animations)

@@ -16,10 +16,14 @@ import {
   type AudioClipEntry,
   type SequencePlayerControls,
   type TransitionType,
+  type CustomCodeConfig,
 } from '../runtime/sequence';
 import type { AnyAnimationDefinition, AnimationDefinition } from '../runtime/types';
 import { isSimpleAnimation } from '../runtime/types';
+import { useComposerChat, type ComposerActions, type ComposerSceneInfo } from '../context/ComposerChatContext';
+import { compileCustomCode, validateCustomCode, extractModuleConfig, isFullAnimationModule, CUSTOM_CODE_TEMPLATE } from '../runtime/custom-code';
 import { ParameterPanel } from '../components/ParameterPanel';
+import { AnimationThumbnail } from '../components/AnimationThumbnail';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
@@ -36,6 +40,7 @@ import {
 import { ThemeToggle } from '../components/theme-toggle';
 import {
   ArrowLeft,
+  ArrowLeftRight,
   Play,
   Pause,
   Plus,
@@ -57,6 +62,11 @@ import {
   Film,
   Music,
   Volume2,
+  Code,
+  LayoutGrid,
+  AlertCircle,
+  Check,
+  Undo2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -243,12 +253,14 @@ function SequenceSettingsSidebar({
 function SceneSettingsSidebar({
   scene,
   animationsMap,
+  audioClips,
   onUpdate,
   onDuplicate,
   onRemove,
 }: {
   scene: SceneEntry;
   animationsMap: Map<string, AnyAnimationDefinition>;
+  audioClips: AudioClipEntry[];
   onUpdate: (updates: Partial<SceneEntry>) => void;
   onDuplicate: () => void;
   onRemove: () => void;
@@ -260,6 +272,7 @@ function SceneSettingsSidebar({
   const fullAnim = hasParams
     ? (animation as AnimationDefinition<Record<string, unknown>>)
     : null;
+  const isAudioReactive = fullAnim?.audioReactive === true;
   const paramSchema = fullAnim?.params?.schema;
   const paramDefaults = fullAnim?.params?.defaults ?? {};
 
@@ -300,9 +313,30 @@ function SceneSettingsSidebar({
       {/* Animation ref */}
       <div>
         <Label className="text-xs">Animation</Label>
-        <div className="mt-1 px-3 py-2 rounded-md border bg-muted/50 text-sm font-mono">
-          {scene.animationId}
-        </div>
+        {scene.customCode ? (
+          <div className="mt-1">
+            <div className="flex items-center gap-1.5 px-3 py-2 rounded-md border bg-muted/50 text-sm">
+              <Code className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+              <span className="font-mono truncate">{scene.label || 'Custom Code'}</span>
+              <span className="ml-auto text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full font-medium">Code</span>
+            </div>
+            <details className="mt-2">
+              <summary className="text-[11px] text-muted-foreground cursor-pointer hover:text-foreground">
+                Edit code
+              </summary>
+              <textarea
+                value={scene.customCode}
+                onChange={(e) => onUpdate({ customCode: e.target.value })}
+                className="w-full h-[160px] mt-1.5 rounded-md border bg-muted/50 p-2 font-mono text-[11px] leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-primary/50"
+                spellCheck={false}
+              />
+            </details>
+          </div>
+        ) : (
+          <div className="mt-1 px-3 py-2 rounded-md border bg-muted/50 text-sm font-mono">
+            {scene.animationId}
+          </div>
+        )}
       </div>
 
       {/* Duration */}
@@ -378,6 +412,50 @@ function SceneSettingsSidebar({
           <Switch checked={scene.transparentBg ?? false}
             onCheckedChange={(checked) => onUpdate({ transparentBg: checked })} />
         </div>
+      )}
+
+      {/* Reverse playback */}
+      <div className="flex items-center justify-between">
+        <Label className="text-xs">Reverse Playback</Label>
+        <Switch checked={scene.reversed ?? false}
+          onCheckedChange={(checked) => onUpdate({ reversed: checked })} />
+      </div>
+
+      {/* ── Audio Source (for audio-reactive animations) ── */}
+      {isAudioReactive && (
+        <>
+          <Separator />
+          <div>
+            <div className="flex items-center gap-1.5 mb-2">
+              <Volume2 className="h-3.5 w-3.5 text-muted-foreground" />
+              <Label className="text-xs font-semibold">Audio Source</Label>
+            </div>
+            <p className="text-[11px] text-muted-foreground mb-2">
+              This animation reacts to audio. Pick a timeline audio clip to drive the visualizer.
+            </p>
+            <select
+              className="w-full h-8 rounded-md border bg-background px-2 text-sm"
+              value={scene.audioClipId ?? ''}
+              onChange={(e) => {
+                const val = e.target.value;
+                onUpdate({ audioClipId: val === '' ? undefined : val });
+              }}
+            >
+              <option value="">Auto-detect (overlapping clip)</option>
+              <option value="none">None (no audio)</option>
+              {audioClips.map((clip) => (
+                <option key={clip.clipId} value={clip.clipId}>
+                  {clip.label || clip.audioFilename || clip.clipId}
+                </option>
+              ))}
+            </select>
+            {scene.audioClipId && scene.audioClipId !== 'none' && (
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Linked to: {audioClips.find((c) => c.clipId === scene.audioClipId)?.audioFilename ?? scene.audioClipId}
+              </p>
+            )}
+          </div>
+        </>
       )}
 
       <Separator />
@@ -620,6 +698,7 @@ function Timeline({
   totalDurationMs,
   currentTimeMs,
   playing,
+  pingPong,
   selectedSceneIds,
   selectedAudioClipId,
   onSelectScene,
@@ -628,6 +707,7 @@ function Timeline({
   onSeek,
   onTogglePlay,
   onRestart,
+  onTogglePingPong,
   onOpenPicker,
   onOpenAudioPicker,
   onUpdateScene,
@@ -640,6 +720,7 @@ function Timeline({
   totalDurationMs: number;
   currentTimeMs: number;
   playing: boolean;
+  pingPong: boolean;
   selectedSceneIds: Set<string>;
   selectedAudioClipId: string | null;
   onSelectScene: (id: string | null, additive?: boolean) => void;
@@ -648,6 +729,7 @@ function Timeline({
   onSeek: (ms: number) => void;
   onTogglePlay: () => void;
   onRestart: () => void;
+  onTogglePingPong: () => void;
   onOpenPicker: () => void;
   onOpenAudioPicker: () => void;
   onUpdateScene: (sceneId: string, updates: Partial<SceneEntry>) => void;
@@ -1265,6 +1347,15 @@ function Timeline({
           onClick={() => onSeek(totalDurationMs)}>
           <SkipForward className="h-3.5 w-3.5" />
         </Button>
+        <Button
+          variant={pingPong ? 'default' : 'ghost'}
+          size="icon"
+          className="h-7 w-7"
+          onClick={onTogglePingPong}
+          title={pingPong ? 'Ping-pong: ON (0→100%→0)' : 'Ping-pong: OFF (0→100% loop)'}
+        >
+          <ArrowLeftRight className="h-3.5 w-3.5" />
+        </Button>
 
         <div className="text-xs tabular-nums text-muted-foreground ml-2 font-mono">
           {formatTimecode(currentTimeMs)} / {formatTimecode(totalDurationMs)}
@@ -1421,6 +1512,8 @@ function Timeline({
                         {/* Clip content */}
                         <div className="relative z-10 flex items-center gap-1 px-2 py-0.5 h-full overflow-hidden">
                           <GripVertical className="h-3 w-3 text-white/50 flex-shrink-0 cursor-grab" />
+                          {scene.customCode && <Code className="h-3 w-3 text-white/60 flex-shrink-0" />}
+                          {scene.reversed && <Undo2 className="h-3 w-3 text-white/60 flex-shrink-0" title="Reversed" />}
                           <div className="min-w-0 flex-1">
                             <div className="text-[11px] font-medium text-white truncate leading-tight">
                               {scene.label || scene.animationId}
@@ -1669,6 +1762,19 @@ export function Composer() {
   const [hoveredSceneId, setHoveredSceneId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState('');
+  const [pickerTab, setPickerTab] = useState<'gallery' | 'code'>('gallery');
+  const [customCode, setCustomCode] = useState(CUSTOM_CODE_TEMPLATE);
+  const [customCodeError, setCustomCodeError] = useState<string | null>(null);
+  const [customCodeConfig, setCustomCodeConfig] = useState<CustomCodeConfig>({
+    name: 'Custom Animation',
+    width: 800,
+    height: 600,
+    durationMs: 3000,
+    fps: 60,
+    background: '#000000',
+  });
+  const customCodePreviewRef = useRef<HTMLCanvasElement>(null);
+  const customCodeRafRef = useRef<number | null>(null);
   const [exportMp4Open, setExportMp4Open] = useState(false);
   const [exportMp4Progress, setExportMp4Progress] = useState(0);
   const [exportMp4Exporting, setExportMp4Exporting] = useState(false);
@@ -1687,6 +1793,7 @@ export function Composer() {
   const [playing, setPlaying] = useState(false);
   const [currentTimeMs, setCurrentTimeMs] = useState(0);
   const [totalDurationMs, setTotalDurationMs] = useState(0);
+  const [pingPong, setPingPong] = useState(false);
 
   // Canvas zoom/pan state
   const [canvasZoom, setCanvasZoom] = useState(1);
@@ -1798,14 +1905,23 @@ export function Composer() {
     };
   }, [isResizingTimeline]);
 
-  // Build animations map
+  // Build animations map (gallery + custom code scenes)
   const animationsMap = useMemo(() => {
     const map = new Map<string, AnyAnimationDefinition>();
     for (const entry of animations) {
       map.set(getAnimationId(entry), entry.definition);
     }
+    // Compile custom code scenes and add them to the map
+    for (const scene of sequence.scenes) {
+      if (scene.customCode && !map.has(scene.animationId)) {
+        const compiled = compileCustomCode(scene.customCode, scene.customCodeConfig);
+        if (compiled) {
+          map.set(scene.animationId, compiled);
+        }
+      }
+    }
     return map;
-  }, [animations]);
+  }, [animations, sequence.scenes]);
 
   useEffect(() => {
     setTotalDurationMs(getSequenceDurationMs(sequence.scenes, sequence.audioClips));
@@ -1962,6 +2078,11 @@ export function Composer() {
     pendingTimeMsRef.current = ms;
     setCurrentTimeMs(ms);
   }, []);
+
+  // Sync ping-pong mode with the player
+  useEffect(() => {
+    playerRef.current?.setPingPong(pingPong);
+  }, [pingPong]);
 
   // ─── Save / Load / Export / Import ─────────────────────────────────────────
 
@@ -2538,6 +2659,32 @@ export function Composer() {
     toast.success(`Added "${name}" to timeline`);
   };
 
+  const addCustomCodeScene = () => {
+    const error = validateCustomCode(customCode);
+    if (error) {
+      setCustomCodeError(error);
+      toast.error(`Invalid code: ${error}`);
+      return;
+    }
+    const config = { ...customCodeConfig };
+    const name = config.name || 'Custom Animation';
+    const animId = `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const newScene: SceneEntry = {
+      sceneId: generateSceneId(),
+      animationId: animId,
+      durationMs: config.durationMs ?? 3000,
+      transition: { type: 'cut', durationMs: 0 },
+      label: name,
+      customCode,
+      customCodeConfig: config,
+    };
+    setSequence((prev) => ({ ...prev, scenes: [...prev.scenes, newScene] }));
+    setSelectedSceneIds(new Set([newScene.sceneId]));
+    setPickerOpen(false);
+    setPickerTab('gallery');
+    toast.success(`Added custom code scene "${name}" to timeline`);
+  };
+
   const removeScene = (sceneId: string) => {
     setSequence((prev) => ({ ...prev, scenes: prev.scenes.filter((s) => s.sceneId !== sceneId) }));
     setSelectedSceneIds(prev => {
@@ -2564,6 +2711,143 @@ export function Composer() {
       scenes: prev.scenes.map((s) => s.sceneId === sceneId ? { ...s, ...updates } : s),
     }));
   };
+
+  // ── Composer ↔ Chat context registration ─────────────────────────────────
+  const { actionsRef, setIsComposerActive } = useComposerChat();
+
+  // Keep the ref updated with latest closures on every render
+  actionsRef.current = {
+    getState: () => {
+      const sceneInfos: ComposerSceneInfo[] = sequence.scenes.map((s, i) => {
+        const anim = animationsMap.get(s.animationId);
+        let availableParams: Record<string, unknown> = {};
+        let currentParams: Record<string, unknown> = { ...(s.params || {}) };
+        if (anim && !isSimpleAnimation(anim)) {
+          const fullAnim = anim as AnimationDefinition<Record<string, unknown>>;
+          availableParams = fullAnim.params.defaults;
+          currentParams = { ...fullAnim.params.defaults, ...s.params };
+        }
+        return {
+          index: i,
+          sceneId: s.sceneId,
+          label: s.label || s.animationId,
+          animationId: s.animationId,
+          durationMs: s.durationMs,
+          currentParams,
+          availableParams,
+          transform: s.transform || DEFAULT_TRANSFORM,
+          transition: s.transition ? { type: s.transition.type, durationMs: s.transition.durationMs } : undefined,
+          transparentBg: s.transparentBg ?? false,
+          reversed: s.reversed ?? false,
+          lane: s.lane ?? 0,
+          connectedTo: s.connectedTo,
+          connectedOffsetMs: s.connectedOffsetMs,
+        };
+      });
+
+      return {
+        sequence,
+        scenes: sceneInfos,
+        availableAnimations: animations.map((e) => ({
+          id: getAnimationId(e),
+          name: getAnimationName(e),
+        })),
+      };
+    },
+
+    updateScene: (sceneIndex: number, updates: Partial<SceneEntry>) => {
+      const scene = sequence.scenes[sceneIndex];
+      if (!scene) return;
+      const finalUpdates = { ...updates };
+      // Merge params with existing (don't replace)
+      if (updates.params) {
+        finalUpdates.params = { ...scene.params, ...updates.params };
+      }
+      // Merge transform with existing (don't replace)
+      if (updates.transform) {
+        finalUpdates.transform = { ...(scene.transform || DEFAULT_TRANSFORM), ...updates.transform };
+      }
+      updateScene(scene.sceneId, finalUpdates);
+    },
+
+    removeScene: (sceneIndex: number) => {
+      const scene = sequence.scenes[sceneIndex];
+      if (scene) removeScene(scene.sceneId);
+    },
+
+    addScene: (animationId: string) => addScene(animationId),
+
+    duplicateScene: (sceneIndex: number) => {
+      const scene = sequence.scenes[sceneIndex];
+      if (scene) duplicateScene(scene.sceneId);
+    },
+
+    updateSequence: (updates) => handleSequenceUpdate(updates),
+
+    addCustomCodeScene: (code: string, label: string, config?: { durationMs?: number; width?: number; height?: number; fps?: number; background?: string }) => {
+      const animId = `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const codeConfig: CustomCodeConfig = {
+        name: label,
+        durationMs: config?.durationMs ?? 3000,
+        width: config?.width,
+        height: config?.height,
+        fps: config?.fps,
+        background: config?.background,
+      };
+      const newScene: SceneEntry = {
+        sceneId: generateSceneId(),
+        animationId: animId,
+        durationMs: codeConfig.durationMs ?? 3000,
+        transition: { type: 'cut', durationMs: 0 },
+        label,
+        customCode: code,
+        customCodeConfig: codeConfig,
+      };
+      setSequence((prev) => ({ ...prev, scenes: [...prev.scenes, newScene] }));
+      setSelectedSceneIds(new Set([newScene.sceneId]));
+    },
+
+    moveToLane: (sceneIndex: number, targetLane: number, anchorSceneIndex?: number, offsetMs?: number) => {
+      const scene = sequence.scenes[sceneIndex];
+      if (!scene) return;
+
+      if (targetLane === 0) {
+        // Move back to primary storyline — clear connected properties
+        updateScene(scene.sceneId, {
+          lane: 0,
+          connectedTo: undefined,
+          connectedOffsetMs: undefined,
+        });
+      } else {
+        // Move to a secondary lane — find anchor scene
+        const primaryScenes = sequence.scenes.filter((s) => (s.lane ?? 0) === 0);
+        let anchor: SceneEntry | undefined;
+        if (anchorSceneIndex != null) {
+          // anchorSceneIndex is the flat index in the full scenes array
+          anchor = sequence.scenes[anchorSceneIndex];
+        }
+        if (!anchor && primaryScenes.length > 0) {
+          // Default: anchor to the first primary scene
+          anchor = primaryScenes[0];
+        }
+
+        updateScene(scene.sceneId, {
+          lane: targetLane,
+          connectedTo: anchor?.sceneId,
+          connectedOffsetMs: offsetMs ?? 0,
+        });
+      }
+    },
+  } satisfies ComposerActions;
+
+  // Register/unregister on mount/unmount
+  useEffect(() => {
+    setIsComposerActive(true);
+    return () => {
+      setIsComposerActive(false);
+      actionsRef.current = null;
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDropOnLane = useCallback((
     sceneId: string,
@@ -2673,6 +2957,74 @@ export function Composer() {
       return name.includes(q) || id.includes(q) || tags.includes(q);
     });
   }, [animations, pickerSearch]);
+
+  // ─── Custom code preview animation ──────────────────────────────────────
+  useEffect(() => {
+    if (!pickerOpen || pickerTab !== 'code') {
+      if (customCodeRafRef.current !== null) {
+        cancelAnimationFrame(customCodeRafRef.current);
+        customCodeRafRef.current = null;
+      }
+      return;
+    }
+
+    const canvas = customCodePreviewRef.current;
+    if (!canvas) return;
+
+    const compiled = compileCustomCode(customCode, customCodeConfig);
+    if (!compiled) {
+      setCustomCodeError(validateCustomCode(customCode));
+      return;
+    }
+    setCustomCodeError(null);
+
+    const previewCtx = canvas.getContext('2d');
+    if (!previewCtx) return;
+
+    const w = customCodeConfig.width || 800;
+    const h = customCodeConfig.height || 600;
+    // Scale preview to fit inside 320px wide box
+    const previewScale = Math.min(320 / w, 180 / h);
+    canvas.width = Math.round(w * previewScale * (window.devicePixelRatio || 1));
+    canvas.height = Math.round(h * previewScale * (window.devicePixelRatio || 1));
+    canvas.style.width = `${Math.round(w * previewScale)}px`;
+    canvas.style.height = `${Math.round(h * previewScale)}px`;
+
+    const durationMs = customCodeConfig.durationMs || 3000;
+    let startTime: number | null = null;
+
+    function animate(timestamp: number) {
+      if (!startTime) startTime = timestamp;
+      const elapsed = (timestamp - startTime) % durationMs;
+      const progress = elapsed / durationMs;
+
+      previewCtx!.save();
+      previewCtx!.setTransform(1, 0, 0, 1, 0, 0);
+      previewCtx!.clearRect(0, 0, canvas!.width, canvas!.height);
+      previewCtx!.scale(
+        previewScale * (window.devicePixelRatio || 1),
+        previewScale * (window.devicePixelRatio || 1)
+      );
+
+      compiled!.render(previewCtx as unknown as CanvasRenderingContext2D, {
+        width: w,
+        height: h,
+        progress,
+      });
+      previewCtx!.restore();
+
+      customCodeRafRef.current = requestAnimationFrame(animate);
+    }
+
+    customCodeRafRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      if (customCodeRafRef.current !== null) {
+        cancelAnimationFrame(customCodeRafRef.current);
+        customCodeRafRef.current = null;
+      }
+    };
+  }, [pickerOpen, pickerTab, customCode, customCodeConfig]);
 
   // Counter-scale for handles/labels so they stay constant size regardless of zoom
   const counterScale = 1 / canvasZoom;
@@ -2970,6 +3322,7 @@ export function Composer() {
             <SceneSettingsSidebar
               scene={selectedScene}
               animationsMap={animationsMap}
+              audioClips={sequence.audioClips || []}
               onUpdate={(updates) => updateScene(selectedScene.sceneId, updates)}
               onDuplicate={() => duplicateScene(selectedScene.sceneId)}
               onRemove={() => removeScene(selectedScene.sceneId)}
@@ -3003,12 +3356,14 @@ export function Composer() {
           totalDurationMs={totalDurationMs}
           currentTimeMs={currentTimeMs}
           playing={playing}
+          pingPong={pingPong}
           selectedSceneIds={selectedSceneIds}
           onSelectScene={handleTimelineSelectScene}
           onMarqueeSelect={handleTimelineMarqueeSelect}
           onSeek={handleSeek}
           onTogglePlay={togglePlay}
           onRestart={restart}
+          onTogglePingPong={() => setPingPong(p => !p)}
           onOpenPicker={() => setPickerOpen(true)}
           onUpdateScene={updateScene}
           onDropOnLane={handleDropOnLane}
@@ -3110,51 +3465,205 @@ export function Composer() {
       </Dialog>
 
       {/* ── Picker Dialog ── */}
-      <Dialog open={pickerOpen} onOpenChange={(open) => { if (!open) setPickerOpen(false); }}>
-        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+      <Dialog open={pickerOpen} onOpenChange={(open) => { if (!open) { setPickerOpen(false); setPickerTab('gallery'); } }}>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
           <DialogHeader>
-            <DialogTitle>Add Animation</DialogTitle>
-            <DialogDescription>Choose an animation from your gallery to add as a scene.</DialogDescription>
+            <DialogTitle>Add Scene</DialogTitle>
+            <DialogDescription>Choose from your gallery or paste custom canvas code.</DialogDescription>
           </DialogHeader>
-          <div className="mb-3">
-            <Input placeholder="Search animations..." value={pickerSearch}
-              onChange={(e) => setPickerSearch(e.target.value)} autoFocus />
+
+          {/* ── Tab switcher ── */}
+          <div className="flex gap-1 p-1 bg-muted rounded-lg w-fit">
+            <button
+              onClick={() => setPickerTab('gallery')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                pickerTab === 'gallery'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              Gallery
+            </button>
+            <button
+              onClick={() => setPickerTab('code')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                pickerTab === 'code'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <Code className="w-3.5 h-3.5" />
+              Custom Code
+            </button>
           </div>
-          <div className="flex-1 overflow-y-auto -mx-6 px-6">
-            {filteredAnimations.length === 0 ? (
-              <div className="py-8 text-center text-muted-foreground">No animations found.</div>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pb-4">
-                {filteredAnimations.map((entry) => {
-                  const id = getAnimationId(entry);
-                  const name = getAnimationName(entry);
-                  const w = entry.definition.width ?? 800;
-                  const h = entry.definition.height ?? 600;
-                  return (
-                    <button key={id} onClick={() => addScene(id)}
-                      className="group relative rounded-lg overflow-hidden border bg-card hover:ring-2 hover:ring-primary transition-all text-left">
-                      <div className="w-full" style={{
-                        backgroundColor: entry.definition.background || 'hsl(var(--muted))',
-                        aspectRatio: `${w} / ${h}`, maxHeight: 120,
-                      }}>
-                        <div className="w-full h-full flex items-center justify-center">
-                          <span className="text-xs text-white/50">{w}×{h}</span>
+
+          {/* ── Gallery tab ── */}
+          {pickerTab === 'gallery' && (
+            <>
+              <div className="mb-3">
+                <Input placeholder="Search animations..." value={pickerSearch}
+                  onChange={(e) => setPickerSearch(e.target.value)} autoFocus />
+              </div>
+              <div className="flex-1 overflow-y-auto -mx-6 px-6">
+                {filteredAnimations.length === 0 ? (
+                  <div className="py-8 text-center text-muted-foreground">No animations found.</div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pb-4">
+                    {filteredAnimations.map((entry) => {
+                      const id = getAnimationId(entry);
+                      const name = getAnimationName(entry);
+                      const w = entry.definition.width ?? 800;
+                      const h = entry.definition.height ?? 600;
+                      return (
+                        <button key={id} onClick={() => addScene(id)}
+                          className="group relative rounded-lg overflow-hidden border bg-card hover:ring-2 hover:ring-primary transition-all text-left">
+                          <div className="w-full" style={{
+                            backgroundColor: entry.definition.background || 'hsl(var(--muted))',
+                            aspectRatio: `${w} / ${h}`, maxHeight: 120,
+                          }}>
+                            <AnimationThumbnail
+                              animation={entry.definition}
+                              isPlaying={pickerOpen}
+                            />
+                          </div>
+                          <div className="p-2">
+                            <div className="text-xs font-medium truncate">{name}</div>
+                            {entry.meta?.tags && entry.meta.tags.length > 0 && (
+                              <div className="text-[10px] text-muted-foreground truncate mt-0.5">
+                                {entry.meta.tags.slice(0, 3).join(' · ')}
+                              </div>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* ── Custom Code tab ── */}
+          {pickerTab === 'code' && (
+            <div className="flex-1 overflow-y-auto -mx-6 px-6 flex flex-col gap-4">
+              <div className="grid grid-cols-[1fr_auto] gap-4">
+                {/* Code editor */}
+                <div className="flex flex-col gap-2">
+                  <Label className="text-xs font-medium">Render Function</Label>
+                  <textarea
+                    value={customCode}
+                    onChange={(e) => {
+                      const newCode = e.target.value;
+                      setCustomCode(newCode);
+                      setCustomCodeError(null);
+                      // Auto-fill config panel from full module code
+                      const extracted = extractModuleConfig(newCode);
+                      if (extracted) {
+                        setCustomCodeConfig(extracted);
+                      }
+                    }}
+                    className="w-full h-[280px] rounded-lg border bg-muted/50 p-3 font-mono text-xs leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary"
+                    spellCheck={false}
+                    placeholder="Paste a full AnimationDefinition module, a render function, or just the function body..."
+                  />
+                  {customCodeError && (
+                    <div className="flex items-start gap-1.5 text-destructive text-xs">
+                      <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                      <span className="font-mono">{customCodeError}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    {isFullAnimationModule(customCode) ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-primary/10 text-primary px-2 py-0.5 rounded-full">
+                        <Check className="w-3 h-3" /> Full AnimationDefinition
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
+                        Simple render function
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Paste a full <code className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">AnimationDefinition</code> module
+                    (TypeScript supported) or a simple <code className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">render(ctx, {'{ width, height, progress }'})</code> function.
+                    Config is auto-extracted from full modules.
+                  </p>
+                </div>
+
+                {/* Preview + config */}
+                <div className="flex flex-col gap-3 w-[200px]">
+                  <Label className="text-xs font-medium">Preview</Label>
+                  <div className="rounded-lg border bg-black overflow-hidden flex items-center justify-center" style={{ minHeight: 120 }}>
+                    <canvas ref={customCodePreviewRef} />
+                  </div>
+
+                  <div className="space-y-2">
+                    <div>
+                      <Label className="text-[11px] text-muted-foreground">Name</Label>
+                      <Input
+                        value={customCodeConfig.name || ''}
+                        onChange={(e) => setCustomCodeConfig((prev) => ({ ...prev, name: e.target.value }))}
+                        className="h-7 text-xs mt-0.5"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <div>
+                        <Label className="text-[11px] text-muted-foreground">Width</Label>
+                        <Input
+                          type="number"
+                          value={customCodeConfig.width || 800}
+                          onChange={(e) => setCustomCodeConfig((prev) => ({ ...prev, width: parseInt(e.target.value) || 800 }))}
+                          className="h-7 text-xs mt-0.5"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-[11px] text-muted-foreground">Height</Label>
+                        <Input
+                          type="number"
+                          value={customCodeConfig.height || 600}
+                          onChange={(e) => setCustomCodeConfig((prev) => ({ ...prev, height: parseInt(e.target.value) || 600 }))}
+                          className="h-7 text-xs mt-0.5"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <div>
+                        <Label className="text-[11px] text-muted-foreground">Duration (ms)</Label>
+                        <Input
+                          type="number"
+                          value={customCodeConfig.durationMs || 3000}
+                          onChange={(e) => setCustomCodeConfig((prev) => ({ ...prev, durationMs: parseInt(e.target.value) || 3000 }))}
+                          className="h-7 text-xs mt-0.5"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-[11px] text-muted-foreground">Background</Label>
+                        <div className="flex gap-1 mt-0.5">
+                          <input
+                            type="color"
+                            value={customCodeConfig.background || '#000000'}
+                            onChange={(e) => setCustomCodeConfig((prev) => ({ ...prev, background: e.target.value }))}
+                            className="h-7 w-7 rounded border cursor-pointer"
+                          />
+                          <Input
+                            value={customCodeConfig.background || '#000000'}
+                            onChange={(e) => setCustomCodeConfig((prev) => ({ ...prev, background: e.target.value }))}
+                            className="h-7 text-xs flex-1"
+                          />
                         </div>
                       </div>
-                      <div className="p-2">
-                        <div className="text-xs font-medium truncate">{name}</div>
-                        {entry.meta?.tags && entry.meta.tags.length > 0 && (
-                          <div className="text-[10px] text-muted-foreground truncate mt-0.5">
-                            {entry.meta.tags.slice(0, 3).join(' · ')}
-                          </div>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
+                    </div>
+                  </div>
+
+                  <Button size="sm" className="w-full mt-1" onClick={addCustomCodeScene}>
+                    <Plus className="w-3.5 h-3.5 mr-1" />
+                    Add to Timeline
+                  </Button>
+                </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

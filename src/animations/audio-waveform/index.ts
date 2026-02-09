@@ -33,6 +33,7 @@ const animation: AnimationDefinition<AudioWaveformParams> = {
   width: 800,
   height: 400,
   background: '#0f0f1a',
+  audioReactive: true,
 
   params: {
     defaults: {

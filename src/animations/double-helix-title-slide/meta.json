@@ -1,0 +1,15 @@
+{
+  "id": "double-helix-title-slide",
+  "name": "Double Helix Title Slide",
+  "createdAt": "2026-02-09",
+  "source": "ai-chat",
+  "prompt": "Animated text that says 'Double Helix', sliding in from the top, with black text color and transparent background. The animation should position the text at the top of the canvas and last for 2 seconds.",
+  "tags": [
+    "text",
+    "title",
+    "slide-in",
+    "entrance",
+    "transparent",
+    "minimal"
+  ]
+}

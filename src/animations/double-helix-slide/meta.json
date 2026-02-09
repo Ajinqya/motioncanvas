@@ -1,0 +1,14 @@
+{
+  "id": "double-helix-slide",
+  "name": "Double Helix Slide",
+  "createdAt": "2026-02-09",
+  "source": "ai-chat",
+  "prompt": "Animated text 'Double Helix' in bold black font slides smoothly from the left edge of the canvas to the center, remaining perfectly centered horizontally and vertically at the end of the animation. The text should move as a whole, so the animation's bounding box follows the text motion. Transparent background. Duration 2 seconds.",
+  "tags": [
+    "text",
+    "slide",
+    "ease",
+    "centered",
+    "minimal"
+  ]
+}

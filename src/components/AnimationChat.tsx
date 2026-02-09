@@ -15,15 +15,21 @@ import {
   Plus,
   ChevronDown,
   Check,
+  Film,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import {
+  useComposerChat,
+  buildSequenceStatePrompt,
+  executeComposerToolCalls,
+} from '../context/ComposerChatContext';
 
 // ── Types ────────────────────────────────────────────────────
 interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  /** Display-only content (what the user sees — without injected source code) */
+  /** Display-only content (what the user sees — without injected state/source) */
   displayContent?: string;
   animationId?: string;
   animationPath?: string;
@@ -37,7 +43,7 @@ interface AnimationInfo {
   source: string;
 }
 
-type ChatMode = 'create' | 'iterate';
+type ChatMode = 'create' | 'iterate' | 'compose';
 
 const API_KEY_STORAGE_KEY = 'openai-api-key';
 
@@ -45,6 +51,10 @@ const API_KEY_STORAGE_KEY = 'openai-api-key';
 export function AnimationChat() {
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Composer integration
+  const { actionsRef, isComposerActive } = useComposerChat();
+  const isOnComposePage = location.pathname === '/compose';
 
   // Derive current animation from route: /a/:id
   const routeAnimationId = location.pathname.startsWith('/a/')
@@ -84,22 +94,23 @@ export function AnimationChat() {
     : animations;
 
   // ── Sync mode with route ─────────────────────────────────
-  // When opening chat on an animation page, default to iterate mode
   useEffect(() => {
     if (!isOpen) return;
 
-    if (routeAnimationId && animations.length > 0) {
+    if (isOnComposePage && isComposerActive) {
+      setMode('compose');
+      setSelectedAnimationId(null);
+    } else if (routeAnimationId && animations.length > 0) {
       const found = animations.find((a) => a.id === routeAnimationId);
       if (found) {
         setMode('iterate');
         setSelectedAnimationId(routeAnimationId);
       }
-    } else if (!routeAnimationId && messages.length === 0) {
-      // On gallery, default to create
+    } else if (!routeAnimationId && !isOnComposePage && messages.length === 0) {
       setMode('create');
       setSelectedAnimationId(null);
     }
-  }, [isOpen, routeAnimationId, animations.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isOpen, routeAnimationId, animations.length, isOnComposePage, isComposerActive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Effects ──────────────────────────────────────────────
   // Auto-scroll to bottom
@@ -114,7 +125,7 @@ export function AnimationChat() {
     }
   }, [isOpen, showApiKeyInput]);
 
-  // Fetch animation list when panel opens
+  // Fetch animation list when panel opens (not needed for compose-only, but harmless)
   useEffect(() => {
     if (!isOpen) return;
     fetch('/api/animations-list')
@@ -148,10 +159,13 @@ export function AnimationChat() {
     const trimmed = input.trim();
     if (!trimmed || isLoading) return;
 
-    // Build the full message content with animation context injected
+    // Build the full message content with context injected
     let fullContent = trimmed;
     if (mode === 'iterate' && selectedAnimation) {
       fullContent = `[EXISTING ANIMATION: ${selectedAnimation.id}]\n${selectedAnimation.source}\n[END ANIMATION]\n\n${trimmed}`;
+    } else if (mode === 'compose' && actionsRef.current) {
+      const state = actionsRef.current.getState();
+      fullContent = buildSequenceStatePrompt(state) + '\n\n' + trimmed;
     }
 
     const userMessage: ChatMessage = {
@@ -174,53 +188,113 @@ export function AnimationChat() {
             : m.content,
       }));
 
-      const payload: Record<string, unknown> = { messages: history };
-      if (apiKey) payload.apiKey = apiKey;
+      if (mode === 'compose') {
+        // ── Compose mode: call compose endpoint ──
+        const payload: Record<string, unknown> = { messages: history };
+        if (apiKey) payload.apiKey = apiKey;
 
-      const response = await fetch('/api/chat-create-animation', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+        const response = await fetch('/api/chat-compose', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
 
-      const data = await response.json();
+        const data = await response.json();
 
-      if (!response.ok) {
-        if (data.error?.includes('API key') || data.error?.includes('api key')) setShowApiKeyInput(true);
-        throw new Error(data.error || 'Request failed');
-      }
+        if (!response.ok) {
+          if (data.error?.includes('API key') || data.error?.includes('api key'))
+            setShowApiKeyInput(true);
+          throw new Error(data.error || 'Request failed');
+        }
 
-      // Build reply content — include code snippet in production (no file write)
-      let replyContent = data.reply || data.description || 'Animation created!';
-      const hasPath = !!data.path; // path is only set when file was written (dev server)
+        // Execute tool calls against the Composer
+        let replyContent = data.reply || '';
+        if (data.toolCalls && data.toolCalls.length > 0 && actionsRef.current) {
+          // Check if there's a create_and_add_scene tool call — show interim message
+          const hasCreate = data.toolCalls.some(
+            (tc: { name: string }) => tc.name === 'create_and_add_scene'
+          );
+          if (hasCreate && replyContent) {
+            // Show the AI's reply immediately before the long generation step
+            const interimMessage: ChatMessage = {
+              id: (Date.now() + 1).toString(),
+              role: 'assistant',
+              content: replyContent,
+            };
+            setMessages((prev) => [...prev, interimMessage]);
+            replyContent = '';
+          }
 
-      if (data.success && data.code && !hasPath) {
-        // Production mode: show description + note that this is preview-only
-        replyContent = `${data.description || 'Generated animation!'}\n\n💡 To add this to your gallery, run the dev server locally and use the chat there. The animation code has been generated successfully.`;
-      }
+          const summaries = await executeComposerToolCalls(
+            data.toolCalls,
+            actionsRef.current,
+            { apiKey: apiKey || undefined },
+          );
+          if (!replyContent) {
+            replyContent = summaries.join('\n');
+          } else {
+            replyContent += '\n\n' + summaries.join('\n');
+          }
+        }
 
-      const assistantMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: replyContent,
-        animationId: data.success ? data.id : undefined,
-        animationPath: hasPath ? data.path : undefined,
-        animationName: data.success ? data.name : undefined,
-        isError: !data.success,
-      };
+        if (!replyContent) {
+          replyContent = 'Done! The sequence has been updated.';
+        }
 
-      setMessages((prev) => [...prev, assistantMessage]);
+        const assistantMessage: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: replyContent,
+        };
+        setMessages((prev) => [...prev, assistantMessage]);
+      } else {
+        // ── Create / Iterate mode: call animation endpoint ──
+        const payload: Record<string, unknown> = { messages: history };
+        if (apiKey) payload.apiKey = apiKey;
 
-      // Auto-switch to iterate mode on the new/updated animation (dev server only)
-      if (data.success && data.id && hasPath) {
-        fetch('/api/animations-list')
-          .then((res) => res.json())
-          .then((list: AnimationInfo[]) => {
-            setAnimations(list);
-            setSelectedAnimationId(data.id);
-            setMode('iterate');
-          })
-          .catch(() => {});
+        const response = await fetch('/api/chat-create-animation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          if (data.error?.includes('API key') || data.error?.includes('api key'))
+            setShowApiKeyInput(true);
+          throw new Error(data.error || 'Request failed');
+        }
+
+        let replyContent = data.reply || data.description || 'Animation created!';
+        const hasPath = !!data.path;
+
+        if (data.success && data.code && !hasPath) {
+          replyContent = `${data.description || 'Generated animation!'}\n\nTo add this to your gallery, run the dev server locally and use the chat there.`;
+        }
+
+        const assistantMessage: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: replyContent,
+          animationId: data.success ? data.id : undefined,
+          animationPath: hasPath ? data.path : undefined,
+          animationName: data.success ? data.name : undefined,
+          isError: !data.success,
+        };
+
+        setMessages((prev) => [...prev, assistantMessage]);
+
+        if (data.success && data.id && hasPath) {
+          fetch('/api/animations-list')
+            .then((res) => res.json())
+            .then((list: AnimationInfo[]) => {
+              setAnimations(list);
+              setSelectedAnimationId(data.id);
+              setMode('iterate');
+            })
+            .catch(() => {});
+        }
       }
     } catch (error) {
       const errorMessage: ChatMessage = {
@@ -233,7 +307,7 @@ export function AnimationChat() {
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, apiKey, messages, mode, selectedAnimation]);
+  }, [input, isLoading, apiKey, messages, mode, selectedAnimation, actionsRef]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -244,8 +318,10 @@ export function AnimationChat() {
 
   const clearMessages = () => {
     setMessages([]);
-    // Reset mode based on current route
-    if (routeAnimationId) {
+    if (isOnComposePage && isComposerActive) {
+      setMode('compose');
+      setSelectedAnimationId(null);
+    } else if (routeAnimationId) {
       setMode('iterate');
       setSelectedAnimationId(routeAnimationId);
     } else {
@@ -270,15 +346,51 @@ export function AnimationChat() {
     setTimeout(() => inputRef.current?.focus(), 0);
   };
 
+  const switchToCompose = () => {
+    setMode('compose');
+    setSelectedAnimationId(null);
+    setShowModeDropdown(false);
+    setAnimationSearch('');
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
   // ── Mode label for the toggle button ─────────────────────
   const modeLabel =
-    mode === 'create'
-      ? 'New'
-      : selectedAnimation
-        ? selectedAnimation.name.length > 16
-          ? selectedAnimation.name.slice(0, 16) + '...'
-          : selectedAnimation.name
-        : 'Edit';
+    mode === 'compose'
+      ? 'Sequence'
+      : mode === 'create'
+        ? 'New'
+        : selectedAnimation
+          ? selectedAnimation.name.length > 16
+            ? selectedAnimation.name.slice(0, 16) + '...'
+            : selectedAnimation.name
+          : 'Edit';
+
+  // ── Header text ──────────────────────────────────────────
+  const headerTitle = mode === 'compose' ? 'Sequence Assistant' : 'Animation Creator';
+  const headerSubtitle =
+    mode === 'compose'
+      ? 'Edit your sequence with natural language'
+      : mode === 'create'
+        ? 'Creating new animation'
+        : `Editing "${selectedAnimation?.name ?? '...'}"`;
+
+  // ── Loading message ──────────────────────────────────────
+  const loadingMessage =
+    mode === 'compose'
+      ? 'Thinking...'
+      : mode === 'iterate' && selectedAnimation
+        ? `Updating "${selectedAnimation.name}"...`
+        : 'Generating animation...';
+
+  // ── Compose mode suggestions ─────────────────────────────
+  const composeSuggestions = [
+    'Describe my timeline',
+    'Make the first clip 2 seconds long',
+    'Create a pulsing neon circle and add it to the timeline',
+    'Add a fade transition between all scenes',
+    'Which scene is the longest?',
+  ];
 
   // ── Render ───────────────────────────────────────────────
   return (
@@ -296,14 +408,19 @@ export function AnimationChat() {
           {/* ── Header ──────────────────────────────────── */}
           <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
             <div className="flex items-center gap-2">
-              <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Sparkles className="h-4 w-4 text-primary" />
+              <div className={cn(
+                'h-8 w-8 rounded-lg flex items-center justify-center',
+                mode === 'compose' ? 'bg-violet-500/10' : 'bg-primary/10'
+              )}>
+                {mode === 'compose' ? (
+                  <Film className="h-4 w-4 text-violet-500" />
+                ) : (
+                  <Sparkles className="h-4 w-4 text-primary" />
+                )}
               </div>
               <div>
-                <h3 className="text-sm font-semibold leading-none">Animation Creator</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {mode === 'create' ? 'Creating new animation' : `Editing "${selectedAnimation?.name ?? '...'}"`}
-                </p>
+                <h3 className="text-sm font-semibold leading-none">{headerTitle}</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">{headerSubtitle}</p>
               </div>
             </div>
             <div className="flex items-center gap-1">
@@ -374,10 +491,39 @@ export function AnimationChat() {
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
             {messages.length === 0 && (
               <div className="flex flex-col items-center justify-center h-full text-center px-4">
-                <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-3">
-                  <Sparkles className="h-6 w-6 text-primary" />
+                <div className={cn(
+                  'h-12 w-12 rounded-2xl flex items-center justify-center mb-3',
+                  mode === 'compose' ? 'bg-violet-500/10' : 'bg-primary/10'
+                )}>
+                  {mode === 'compose' ? (
+                    <Film className="h-6 w-6 text-violet-500" />
+                  ) : (
+                    <Sparkles className="h-6 w-6 text-primary" />
+                  )}
                 </div>
-                {mode === 'iterate' && selectedAnimation ? (
+
+                {mode === 'compose' ? (
+                  <>
+                    <p className="text-sm font-medium mb-1">Sequence assistant</p>
+                    <p className="text-xs text-muted-foreground mb-4">
+                      Ask questions, create new animations, or edit your timeline — all in natural language.
+                    </p>
+                    <div className="space-y-2 w-full">
+                      {composeSuggestions.map((suggestion) => (
+                        <button
+                          key={suggestion}
+                          onClick={() => {
+                            setInput(suggestion);
+                            setTimeout(() => inputRef.current?.focus(), 0);
+                          }}
+                          className="w-full text-left text-xs px-3 py-2 rounded-lg border bg-card hover:bg-accent transition-colors"
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                ) : mode === 'iterate' && selectedAnimation ? (
                   <>
                     <p className="text-sm font-medium mb-1">
                       Editing "{selectedAnimation.name}"
@@ -490,11 +636,7 @@ export function AnimationChat() {
                 <div className="bg-muted rounded-2xl rounded-bl-md px-4 py-3">
                   <div className="flex items-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                    <span className="text-sm text-muted-foreground">
-                      {mode === 'iterate' && selectedAnimation
-                        ? `Updating "${selectedAnimation.name}"...`
-                        : 'Generating animation...'}
-                    </span>
+                    <span className="text-sm text-muted-foreground">{loadingMessage}</span>
                   </div>
                 </div>
               </div>
@@ -509,6 +651,25 @@ export function AnimationChat() {
               ref={dropdownRef}
               className="mx-3 mb-1 rounded-xl border bg-popover shadow-lg overflow-hidden"
             >
+              {/* Compose option — only when Composer is active */}
+              {isComposerActive && (
+                <>
+                  <button
+                    onClick={switchToCompose}
+                    className={cn(
+                      'w-full text-left px-3 py-2.5 text-xs hover:bg-accent transition-colors',
+                      'flex items-center gap-2',
+                      mode === 'compose' && 'bg-accent'
+                    )}
+                  >
+                    <Film className="h-3.5 w-3.5 text-violet-500" />
+                    <span className="font-medium">Edit sequence</span>
+                    {mode === 'compose' && <Check className="h-3 w-3 ml-auto text-violet-500" />}
+                  </button>
+                  <div className="border-t" />
+                </>
+              )}
+
               {/* Create new option */}
               <button
                 onClick={switchToCreate}
@@ -579,12 +740,16 @@ export function AnimationChat() {
                   'shrink-0 h-9 rounded-xl text-xs font-medium px-2.5',
                   'flex items-center gap-1 transition-colors border',
                   'hover:bg-accent disabled:opacity-50',
-                  mode === 'iterate'
-                    ? 'bg-primary/10 border-primary/20 text-primary'
-                    : 'bg-background border-input text-muted-foreground'
+                  mode === 'compose'
+                    ? 'bg-violet-500/10 border-violet-500/20 text-violet-600 dark:text-violet-400'
+                    : mode === 'iterate'
+                      ? 'bg-primary/10 border-primary/20 text-primary'
+                      : 'bg-background border-input text-muted-foreground'
                 )}
               >
-                {mode === 'create' ? (
+                {mode === 'compose' ? (
+                  <Film className="h-3 w-3" />
+                ) : mode === 'create' ? (
                   <Plus className="h-3 w-3" />
                 ) : (
                   <Pencil className="h-3 w-3" />
@@ -599,9 +764,11 @@ export function AnimationChat() {
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder={
-                  mode === 'iterate' && selectedAnimation
-                    ? `Describe changes...`
-                    : 'Describe an animation...'
+                  mode === 'compose'
+                    ? 'Ask, create, or edit...'
+                    : mode === 'iterate' && selectedAnimation
+                      ? 'Describe changes...'
+                      : 'Describe an animation...'
                 }
                 disabled={isLoading}
                 className="h-9 text-sm rounded-xl"

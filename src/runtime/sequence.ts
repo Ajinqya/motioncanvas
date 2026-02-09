@@ -6,7 +6,7 @@
  * transitions between scenes.
  */
 
-import type { AnyAnimationDefinition, AnimationDefinition, RenderContext } from './types';
+import type { AnyAnimationDefinition, AnimationDefinition, RenderContext, AudioData } from './types';
 import { isSimpleAnimation } from './types';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -38,6 +38,16 @@ export const DEFAULT_TRANSFORM: SceneTransform = {
   opacity: 1,
 };
 
+/** Configuration for custom code scenes (scenes not from the gallery) */
+export interface CustomCodeConfig {
+  name?: string;
+  width?: number;
+  height?: number;
+  durationMs?: number;
+  fps?: number;
+  background?: string;
+}
+
 export interface SceneEntry {
   /** Unique id for this scene instance (for reordering / keying) */
   sceneId: string;
@@ -61,6 +71,28 @@ export interface SceneEntry {
   connectedTo?: string;
   /** For connected clips: time offset from the anchor clip's start (ms, can be negative) */
   connectedOffsetMs?: number;
+  /**
+   * Explicit audio binding: clipId of an AudioClipEntry to use as the audio
+   * source for this scene. When set, the sequence player will analyse that
+   * audio clip and pass AudioData to the animation's render context.
+   *
+   * When not set and the animation is `audioReactive`, the player will
+   * auto-detect the first overlapping audio clip on the timeline.
+   *
+   * Set to `'none'` to explicitly disable audio for this scene even if
+   * overlapping clips exist.
+   */
+  audioClipId?: string;
+  /** When true, the animation plays in reverse (progress goes from 1→0 instead of 0→1) */
+  reversed?: boolean;
+  /**
+   * Inline canvas code for custom scenes that don't exist in the gallery.
+   * Should be a render function body or a full `function render(ctx, { width, height, progress }) { ... }`.
+   * When set, the sequence player compiles this into a SimpleAnimationDefinition at runtime.
+   */
+  customCode?: string;
+  /** Configuration for the custom code scene (dimensions, duration, background, etc.) */
+  customCodeConfig?: CustomCodeConfig;
 }
 
 export interface AudioClipEntry {
@@ -207,6 +239,9 @@ export interface SequencePlayerControls {
   getProgress: () => number;
   /** Update the sequence (e.g. after scene reorder) */
   setSequence: (seq: Sequence, anims: Map<string, AnyAnimationDefinition>) => void;
+  /** Enable/disable ping-pong playback (forward then reverse, 0→end→0) */
+  setPingPong: (enabled: boolean) => void;
+  isPingPong: () => boolean;
 }
 
 export function createSequencePlayer(options: SequencePlayerOptions): SequencePlayerControls {
@@ -228,9 +263,176 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
   let lastFrameTime = 0;
   let rafId: number | null = null;
 
+  // Ping-pong playback mode: plays forward then reverses (0→end→0)
+  let pingPong = false;
+
   // ── Audio clip management ───────────────────────────────────────────────
   const audioElements = new Map<string, HTMLAudioElement>();
   const manageAudio = !disableAudio;
+
+  // ── Audio analysis for audio-reactive animations ──────────────────────
+  // A shared AudioContext connects each HTMLAudioElement to an AnalyserNode
+  // so we can extract real-time AudioData and pass it to audio-reactive scenes.
+  let sharedAudioCtx: AudioContext | null = null;
+  const audioSourceNodes = new Map<string, MediaElementAudioSourceNode>();
+  const audioAnalysers = new Map<string, AnalyserNode>();
+  // Analysis buffers (reusable per analyser)
+  const audioFreqBuffers = new Map<string, Uint8Array>();
+  const audioWaveBuffers = new Map<string, Uint8Array>();
+  // Beat detection state per clip
+  const beatState = new Map<string, { lastBeatTime: number; previousBass: number }>();
+  const FFT_SIZE = 256;
+  const BEAT_THRESHOLD = 0.6;
+  const BEAT_COOLDOWN = 150; // ms
+
+  function ensureAudioContext() {
+    if (!sharedAudioCtx) {
+      sharedAudioCtx = new AudioContext();
+    }
+    return sharedAudioCtx;
+  }
+
+  /** Connect an existing HTMLAudioElement to an AnalyserNode for real-time analysis */
+  function connectAnalyser(clipId: string, el: HTMLAudioElement) {
+    if (audioAnalysers.has(clipId)) return; // already connected
+    const actx = ensureAudioContext();
+    const analyser = actx.createAnalyser();
+    analyser.fftSize = FFT_SIZE;
+    analyser.smoothingTimeConstant = 0.8;
+
+    // Create source node — note: a MediaElementAudioSourceNode can only be
+    // created once per HTMLAudioElement, so we guard against double-creation.
+    let src = audioSourceNodes.get(clipId);
+    if (!src) {
+      src = actx.createMediaElementSource(el);
+      audioSourceNodes.set(clipId, src);
+    }
+
+    src.connect(analyser);
+    analyser.connect(actx.destination);
+    audioAnalysers.set(clipId, analyser);
+
+    const bufLen = analyser.frequencyBinCount;
+    audioFreqBuffers.set(clipId, new Uint8Array(bufLen));
+    audioWaveBuffers.set(clipId, new Uint8Array(bufLen));
+    beatState.set(clipId, { lastBeatTime: 0, previousBass: 0 });
+  }
+
+  /** Disconnect and clean up analyser resources for a clip */
+  function disconnectAnalyser(clipId: string) {
+    const src = audioSourceNodes.get(clipId);
+    if (src) {
+      try { src.disconnect(); } catch { /* already disconnected */ }
+      audioSourceNodes.delete(clipId);
+    }
+    const an = audioAnalysers.get(clipId);
+    if (an) {
+      try { an.disconnect(); } catch { /* already disconnected */ }
+      audioAnalysers.delete(clipId);
+    }
+    audioFreqBuffers.delete(clipId);
+    audioWaveBuffers.delete(clipId);
+    beatState.delete(clipId);
+  }
+
+  /** Helper: calculate RMS energy for a byte range */
+  function calcBandEnergy(data: Uint8Array, start: number, end: number): number {
+    let sum = 0;
+    const len = Math.min(end, data.length) - start;
+    if (len <= 0) return 0;
+    for (let i = start; i < Math.min(end, data.length); i++) sum += data[i];
+    return sum / (len * 255);
+  }
+
+  function calcRMS(data: Uint8Array, start: number, end: number): number {
+    let sum = 0;
+    const len = Math.min(end, data.length) - start;
+    if (len <= 0) return 0;
+    for (let i = start; i < Math.min(end, data.length); i++) {
+      const n = (data[i] - 128) / 128;
+      sum += n * n;
+    }
+    return Math.sqrt(sum / len);
+  }
+
+  /** Get AudioData from a specific audio clip's analyser. Returns undefined if not available. */
+  function getClipAudioData(clipId: string): AudioData | undefined {
+    const analyser = audioAnalysers.get(clipId);
+    if (!analyser) return undefined;
+
+    const freq = audioFreqBuffers.get(clipId)!;
+    const wave = audioWaveBuffers.get(clipId)!;
+    analyser.getByteFrequencyData(freq);
+    analyser.getByteTimeDomainData(wave);
+
+    const binCount = analyser.frequencyBinCount;
+    const bassEnd = Math.floor(binCount * 0.05);
+    const midEnd = Math.floor(binCount * 0.3);
+
+    const bass = calcBandEnergy(freq, 0, bassEnd);
+    const mid = calcBandEnergy(freq, bassEnd, midEnd);
+    const high = calcBandEnergy(freq, midEnd, binCount);
+    const amplitude = calcRMS(wave, 0, wave.length);
+
+    // Beat detection
+    const bs = beatState.get(clipId)!;
+    const now = performance.now();
+    let isBeat = false;
+    if (bass > BEAT_THRESHOLD && bass > bs.previousBass * 1.2 && now - bs.lastBeatTime > BEAT_COOLDOWN) {
+      isBeat = true;
+      bs.lastBeatTime = now;
+    }
+    bs.previousBass = bass;
+
+    return {
+      frequency: freq,
+      waveform: wave,
+      amplitude: Math.min(1, amplitude * 2),
+      bass,
+      mid,
+      high,
+      isBeat,
+    };
+  }
+
+  /**
+   * Determine which audio clip (if any) should provide AudioData for a scene.
+   *
+   * Priority:
+   * 1. Explicit `scene.audioClipId` binding (unless 'none')
+   * 2. Auto-detect: first overlapping audio clip at `timeMs`
+   *
+   * Only returns a clipId when the animation is audio-reactive.
+   */
+  function resolveAudioClipForScene(
+    scene: SceneEntry,
+    animation: AnyAnimationDefinition,
+    sceneStartMs: number,
+    sceneEndMs: number,
+    timeMs: number,
+  ): string | undefined {
+    // Only for full animations that declare audioReactive
+    if (isSimpleAnimation(animation)) return undefined;
+    const fullAnim = animation as AnimationDefinition<Record<string, unknown>>;
+    if (!fullAnim.audioReactive) return undefined;
+
+    // Explicit binding
+    if (scene.audioClipId === 'none') return undefined;
+    if (scene.audioClipId) return scene.audioClipId;
+
+    // Auto-detect: find the first audio clip that overlaps with this scene at the current time
+    const clips = sequence.audioClips || [];
+    for (const clip of clips) {
+      const clipStart = clip.startMs;
+      const clipEnd = clipStart + (clip.trimEndMs - clip.trimStartMs);
+      // Check if the audio clip overlaps the scene's time range at the current playback time
+      if (timeMs >= clipStart && timeMs < clipEnd && timeMs >= sceneStartMs && timeMs < sceneEndMs) {
+        return clip.clipId;
+      }
+    }
+
+    return undefined;
+  }
 
   function syncAudioElements() {
     if (!manageAudio) return;
@@ -242,6 +444,7 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
         el.pause();
         el.src = '';
         audioElements.delete(id);
+        disconnectAnalyser(id);
       }
     }
     // Create/update elements for current clips
@@ -256,6 +459,8 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
         audioElements.set(clip.clipId, el);
       }
       el.volume = clip.volume;
+      // Connect analyser for this clip (idempotent)
+      connectAnalyser(clip.clipId, el);
     }
   }
 
@@ -321,11 +526,16 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
   }
 
   function destroyAllAudioClips() {
-    for (const [, el] of audioElements) {
+    for (const [id, el] of audioElements) {
       el.pause();
       el.src = '';
+      disconnectAnalyser(id);
     }
     audioElements.clear();
+    if (sharedAudioCtx) {
+      sharedAudioCtx.close().catch(() => {});
+      sharedAudioCtx = null;
+    }
   }
 
   // HiDPI
@@ -355,8 +565,16 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
     localTimeSec: number,
     scene: SceneEntry,
     w: number,
-    h: number
+    h: number,
+    audioData?: AudioData
   ) {
+    // Reverse playback: flip progress (1→0) and time accordingly
+    if (scene.reversed) {
+      localProgress = 1 - localProgress;
+      const durationSec = scene.durationMs / 1000;
+      localTimeSec = durationSec - localTimeSec;
+    }
+
     const params = scene.params || {};
     const transform = scene.transform || DEFAULT_TRANSFORM;
     const transparentBg = scene.transparentBg ?? false;
@@ -421,6 +639,7 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
         dpr,
         params: mergedParams,
         frame: Math.floor(localTimeSec * (fullAnim.fps ?? 60)),
+        audio: audioData,
       };
       fullAnim.render(renderCtx);
     }
@@ -582,7 +801,9 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
         ctxA.clearRect(0, 0, offA.width, offA.height);
       }
       ctxA.scale(dpr, dpr);
-      renderAnimation(ctxA, animA, localProgressA, localTimeSecA, sceneA, width, height);
+      const audioClipIdA = resolveAudioClipForScene(sceneA, animA, timingA.startMs, timingA.endMs, timeMs);
+      const audioDataA = audioClipIdA ? getClipAudioData(audioClipIdA) : undefined;
+      renderAnimation(ctxA, animA, localProgressA, localTimeSecA, sceneA, width, height, audioDataA);
       ctxA.restore();
 
       if (animB && nextScene && nextTiming) {
@@ -599,7 +820,9 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
           ctxB.clearRect(0, 0, offB.width, offB.height);
         }
         ctxB.scale(dpr, dpr);
-        renderAnimation(ctxB, animB, nextLocalProgress, nextLocalTimeSec, nextScene, width, height);
+        const audioClipIdB = resolveAudioClipForScene(nextScene, animB, nextTiming.startMs, nextTiming.endMs, timeMs);
+        const audioDataB = audioClipIdB ? getClipAudioData(audioClipIdB) : undefined;
+        renderAnimation(ctxB, animB, nextLocalProgress, nextLocalTimeSec, nextScene, width, height, audioDataB);
         ctxB.restore();
         const transitionProgress = (timeMs - (timingA.endMs - transition.durationMs)) / transition.durationMs;
         ctx.save();
@@ -621,11 +844,13 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
         const localMs = Math.max(0, Math.min(timeMs - entry.timing.startMs, entry.scene.durationMs));
         const localProgress = entry.scene.durationMs > 0 ? localMs / entry.scene.durationMs : 0;
         const localTimeSec = localMs / 1000;
+        const connAudioClipId = resolveAudioClipForScene(entry.scene, anim, entry.timing.startMs, entry.timing.endMs, timeMs);
+        const connAudioData = connAudioClipId ? getClipAudioData(connAudioClipId) : undefined;
         offCtx.save();
         offCtx.setTransform(1, 0, 0, 1, 0, 0);
         offCtx.clearRect(0, 0, offA.width, offA.height);
         offCtx.scale(dpr, dpr);
-        renderAnimation(offCtx, anim, localProgress, localTimeSec, entry.scene, width, height);
+        renderAnimation(offCtx, anim, localProgress, localTimeSec, entry.scene, width, height, connAudioData);
         offCtx.restore();
         ctx.save();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -655,17 +880,31 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
       const localMs = Math.max(0, Math.min(timeMs - entry.timing.startMs, entry.scene.durationMs));
       const localProgress = entry.scene.durationMs > 0 ? localMs / entry.scene.durationMs : 0;
       const localTimeSec = localMs / 1000;
+      const entryAudioClipId = resolveAudioClipForScene(entry.scene, anim, entry.timing.startMs, entry.timing.endMs, timeMs);
+      const entryAudioData = entryAudioClipId ? getClipAudioData(entryAudioClipId) : undefined;
       offCtx.save();
       offCtx.setTransform(1, 0, 0, 1, 0, 0);
       offCtx.clearRect(0, 0, offA.width, offA.height);
       offCtx.scale(dpr, dpr);
-      renderAnimation(offCtx, anim, localProgress, localTimeSec, entry.scene, width, height);
+      renderAnimation(offCtx, anim, localProgress, localTimeSec, entry.scene, width, height, entryAudioData);
       offCtx.restore();
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(offA, 0, 0);
       ctx.restore();
     }
+  }
+
+  /**
+   * Map raw internal time to display time.
+   * In ping-pong mode the effective loop is 2×totalMs: the first half plays
+   * forward (0→totalMs) and the second half plays in reverse (totalMs→0).
+   */
+  function getDisplayTimeMs(rawTimeMs: number, totalMs: number): number {
+    if (!pingPong || totalMs <= 0) return rawTimeMs;
+    const cycleDuration = totalMs * 2;
+    const cycleTime = rawTimeMs % cycleDuration;
+    return cycleTime <= totalMs ? cycleTime : cycleDuration - cycleTime;
   }
 
   function tick(timestamp: number) {
@@ -679,20 +918,25 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
     lastFrameTime = timestamp;
 
     const totalMs = getSequenceDurationMs(sequence.scenes, sequence.audioClips);
-    currentTimeMs = timestamp - startTime;
+    const rawTimeMs = timestamp - startTime;
+    const loopDuration = pingPong && totalMs > 0 ? totalMs * 2 : totalMs;
 
-    if (totalMs > 0 && currentTimeMs >= totalMs) {
-      currentTimeMs = currentTimeMs % totalMs;
+    if (loopDuration > 0 && rawTimeMs >= loopDuration) {
+      // Wrap around at the loop boundary
+      currentTimeMs = rawTimeMs % loopDuration;
       startTime = timestamp - currentTimeMs;
-      // On loop, restart audio clips
       pauseAllAudioClips();
+    } else {
+      currentTimeMs = rawTimeMs;
     }
 
-    renderFrame(currentTimeMs);
+    const displayTimeMs = getDisplayTimeMs(currentTimeMs, totalMs);
+
+    renderFrame(displayTimeMs);
     tickAudioClips();
 
-    const progress = totalMs > 0 ? currentTimeMs / totalMs : 0;
-    onFrame?.(currentTimeMs, progress);
+    const progress = totalMs > 0 ? displayTimeMs / totalMs : 0;
+    onFrame?.(displayTimeMs, progress);
 
     rafId = requestAnimationFrame(tick);
   }
@@ -724,13 +968,17 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
 
   function seek(timeMs: number) {
     const totalMs = getSequenceDurationMs(sequence.scenes, sequence.audioClips);
-    currentTimeMs = Math.max(0, Math.min(timeMs, totalMs));
+    const clampedMs = Math.max(0, Math.min(timeMs, totalMs));
+    // In ping-pong mode the internal clock uses the forward half of the cycle
+    // for display times 0→totalMs. The seek target is a display time, so map
+    // it directly to the internal time (forward direction).
+    currentTimeMs = clampedMs;
     pausedAt = currentTimeMs;
     startTime = performance.now() - currentTimeMs;
-    seekAudioClips(currentTimeMs);
-    renderFrame(currentTimeMs);
-    const progress = totalMs > 0 ? currentTimeMs / totalMs : 0;
-    onFrame?.(currentTimeMs, progress);
+    seekAudioClips(clampedMs);
+    renderFrame(clampedMs);
+    const progress = totalMs > 0 ? clampedMs / totalMs : 0;
+    onFrame?.(clampedMs, progress);
   }
 
   function restart() {
@@ -751,6 +999,18 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
     destroyAllAudioClips();
     offA = null;
     offB = null;
+  }
+
+  function setPingPong(enabled: boolean) {
+    if (enabled === pingPong) return;
+    // Preserve the current display position when toggling modes
+    const totalMs = getSequenceDurationMs(sequence.scenes, sequence.audioClips);
+    const displayMs = getDisplayTimeMs(currentTimeMs, totalMs);
+    pingPong = enabled;
+    // Map display time back to internal time (forward direction)
+    currentTimeMs = displayMs;
+    pausedAt = currentTimeMs;
+    startTime = performance.now() - currentTimeMs;
   }
 
   function setSequence(seq: Sequence, anims: Map<string, AnyAnimationDefinition>) {
@@ -800,11 +1060,17 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
     restart,
     destroy,
     isPlaying: () => playing,
-    getTimeMs: () => currentTimeMs,
+    getTimeMs: () => {
+      const totalMs = getSequenceDurationMs(sequence.scenes, sequence.audioClips);
+      return getDisplayTimeMs(currentTimeMs, totalMs);
+    },
     getProgress: () => {
       const totalMs = getSequenceDurationMs(sequence.scenes, sequence.audioClips);
-      return totalMs > 0 ? currentTimeMs / totalMs : 0;
+      const displayMs = getDisplayTimeMs(currentTimeMs, totalMs);
+      return totalMs > 0 ? displayMs / totalMs : 0;
     },
     setSequence,
+    setPingPong,
+    isPingPong: () => pingPong,
   };
 }
