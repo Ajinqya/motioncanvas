@@ -994,6 +994,8 @@ function Timeline({
 }) {
   const timelineRef = useRef<HTMLDivElement>(null);
   const sequenceRef = useRef(sequence);
+  const selectedKfsRef = useRef(selectedKfs);
+  selectedKfsRef.current = selectedKfs;
   const onDropOnLaneRef = useRef(onDropOnLane);
   const xToMsRef = useRef<(clientX: number, containerEl: HTMLElement) => number>(() => 0);
   const [trimming, setTrimming] = useState<{
@@ -1040,6 +1042,8 @@ function Timeline({
     startX: number;
     clipLeft: number;
     clipWidth: number;
+    /** Original times of ALL selected keyframes when drag started — prevents accumulation */
+    origTimes: Map<string, number>; // key: "sceneId|trackKey|kfIdx" → original time
   } | null>(null);
   const [kfDragActive, setKfDragActive] = useState(false);
 
@@ -1421,7 +1425,21 @@ function Timeline({
       const dx = e.clientX - d.startX;
       const timeDelta = dx / d.clipWidth;
       const seq = sequenceRef.current;
-      const kfs = selectedKfs.length > 0 ? selectedKfs : [{ sceneId: d.sceneId, trackKey: d.trackKey, kfIdx: d.kfIdx }];
+      const kfs = selectedKfsRef.current.length > 0
+        ? selectedKfsRef.current
+        : [{ sceneId: d.sceneId, trackKey: d.trackKey, kfIdx: d.kfIdx }];
+
+      // Compute playhead local progress for snap-to-playhead per scene
+      const tms = timingsRef.current;
+      const playheadSnapMap = new Map<string, number>(); // sceneId → playhead local progress (0-1)
+      for (let i = 0; i < seq.scenes.length; i++) {
+        const sc = seq.scenes[i];
+        const t = tms[i];
+        if (!t || sc.durationMs <= 0) continue;
+        const localMs = Math.max(0, Math.min(currentTimeMsRef.current - t.startMs, sc.durationMs));
+        playheadSnapMap.set(sc.sceneId, localMs / sc.durationMs);
+      }
+      const kfSnapThreshold = SNAP_THRESHOLD_PX / d.clipWidth; // threshold in normalized time
 
       // Build updated scenes with all selected keyframes moved
       const updatedSceneMap = new Map<string, SceneEntry>();
@@ -1430,46 +1448,63 @@ function Timeline({
         if (!scene?.keyframes) continue;
         const track = scene.keyframes[kf.trackKey];
         if (!track || !track[kf.kfIdx]) continue;
-        const origTime = track[kf.kfIdx].time;
-        const newTime = Math.max(0, Math.min(1, origTime + timeDelta));
+        // Use ORIGINAL time from drag start — prevents accumulation
+        const origKey = `${kf.sceneId}|${kf.trackKey}|${kf.kfIdx}`;
+        const origTime = d.origTimes.get(origKey);
+        if (origTime === undefined) continue;
+        let newTime = Math.max(0, Math.min(1, origTime + timeDelta));
+        // Snap to playhead position
+        const playheadProgress = playheadSnapMap.get(kf.sceneId);
+        if (playheadProgress !== undefined && Math.abs(newTime - playheadProgress) < kfSnapThreshold) {
+          newTime = playheadProgress;
+        }
         const newTrack = [...track];
         newTrack[kf.kfIdx] = { ...newTrack[kf.kfIdx], time: newTime };
         const updatedScene = { ...scene, keyframes: { ...scene.keyframes, [kf.trackKey]: newTrack } };
         updatedSceneMap.set(kf.sceneId, updatedScene);
       }
 
-      // Sort tracks and update indices for selection
-      const newSelectedKfs: SelectedKf[] = [];
+      // Update scenes WITHOUT sorting during drag (sort on mouseup to avoid index confusion)
       for (const [sceneId, scene] of updatedSceneMap) {
-        for (const trackKey of TRANSFORM_TRACK_KEYS) {
-          const track = scene.keyframes?.[trackKey];
-          if (!track) continue;
-          // Capture original times before sorting
-          const timesBeforeSort = track.map((kf) => kf.time);
-          track.sort((a, b) => a.time - b.time);
-          // Re-map selected kf indices after sort
-          for (const selKf of kfs) {
-            if (selKf.sceneId !== sceneId || selKf.trackKey !== trackKey) continue;
-            const targetTime = timesBeforeSort[selKf.kfIdx];
-            const newIdx = track.findIndex((kf) => Math.abs(kf.time - targetTime) < 0.0001);
-            if (newIdx >= 0) {
-              newSelectedKfs.push({ sceneId, trackKey, kfIdx: newIdx });
-            }
-          }
-        }
         onUpdateScene(sceneId, { keyframes: scene.keyframes });
-      }
-
-      if (newSelectedKfs.length > 0) {
-        onSetSelectedKfs(newSelectedKfs);
-        // Also update the drag ref's index for the primary dragged keyframe
-        const primaryNew = newSelectedKfs.find(
-          (k) => k.sceneId === d.sceneId && k.trackKey === d.trackKey
-        );
-        if (primaryNew) d.kfIdx = primaryNew.kfIdx;
       }
     };
     const handleMouseUp = () => {
+      // Sort keyframe tracks after drag ends and update selection indices
+      const d = kfDragRef.current;
+      if (d) {
+        const seq = sequenceRef.current;
+        const kfs = selectedKfsRef.current.length > 0
+          ? selectedKfsRef.current
+          : [{ sceneId: d.sceneId, trackKey: d.trackKey, kfIdx: d.kfIdx }];
+        const sceneIds = new Set(kfs.map((k) => k.sceneId));
+        const newSelectedKfs: SelectedKf[] = [];
+        for (const sceneId of sceneIds) {
+          const scene = seq.scenes.find((s) => s.sceneId === sceneId);
+          if (!scene?.keyframes) continue;
+          const updatedKeyframes = { ...scene.keyframes };
+          for (const trackKey of TRANSFORM_TRACK_KEYS) {
+            const track = updatedKeyframes[trackKey];
+            if (!track) continue;
+            const timesBeforeSort = track.map((kf) => kf.time);
+            const sorted = [...track].sort((a, b) => a.time - b.time);
+            updatedKeyframes[trackKey] = sorted;
+            // Re-map selected kf indices after sort
+            for (const selKf of kfs) {
+              if (selKf.sceneId !== sceneId || selKf.trackKey !== trackKey) continue;
+              const targetTime = timesBeforeSort[selKf.kfIdx];
+              const newIdx = sorted.findIndex((kf) => Math.abs(kf.time - targetTime) < 0.0001);
+              if (newIdx >= 0) {
+                newSelectedKfs.push({ sceneId, trackKey, kfIdx: newIdx });
+              }
+            }
+          }
+          onUpdateScene(sceneId, { keyframes: updatedKeyframes });
+        }
+        if (newSelectedKfs.length > 0) {
+          onSetSelectedKfs(newSelectedKfs);
+        }
+      }
       kfDragRef.current = null;
       setKfDragActive(false);
     };
@@ -1479,7 +1514,7 @@ function Timeline({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [kfDragActive, onUpdateScene, selectedKfs, onSetSelectedKfs]);
+  }, [kfDragActive, onUpdateScene, onSetSelectedKfs]);
 
   // (Delete / Escape for selected keyframes is now handled by the Composer-level keyboard handler)
 
@@ -2284,22 +2319,35 @@ function Timeline({
                                       onMouseDown={(e) => {
                                         e.stopPropagation();
                                         e.preventDefault();
-                                        // Select keyframe(s) — Shift adds to selection
+                                        const thisKf = { sceneId: scene.sceneId, trackKey, kfIdx };
+                                        // Compute final selection synchronously so we can capture origTimes
+                                        let newSelection: SelectedKf[];
                                         if (e.shiftKey) {
-                                          onSetSelectedKfs((prev) => {
-                                            const already = prev.some(
-                                              (k) => k.sceneId === scene.sceneId && k.trackKey === trackKey && k.kfIdx === kfIdx
-                                            );
-                                            return already
-                                              ? prev.filter(
-                                                  (k) => !(k.sceneId === scene.sceneId && k.trackKey === trackKey && k.kfIdx === kfIdx)
-                                                )
-                                              : [...prev, { sceneId: scene.sceneId, trackKey, kfIdx }];
-                                          });
+                                          const prev = selectedKfsRef.current;
+                                          const already = prev.some(
+                                            (k) => k.sceneId === scene.sceneId && k.trackKey === trackKey && k.kfIdx === kfIdx
+                                          );
+                                          newSelection = already
+                                            ? prev.filter(
+                                                (k) => !(k.sceneId === scene.sceneId && k.trackKey === trackKey && k.kfIdx === kfIdx)
+                                              )
+                                            : [...prev, thisKf];
                                         } else {
-                                          onSetSelectedKfs([{ sceneId: scene.sceneId, trackKey, kfIdx }]);
+                                          newSelection = [thisKf];
                                         }
+                                        onSetSelectedKfs(newSelection);
                                         onSelectScene(scene.sceneId);
+                                        // Capture original times for all keyframes that will be dragged
+                                        const kfsToMove = newSelection.length > 0 ? newSelection : [thisKf];
+                                        const origTimes = new Map<string, number>();
+                                        const seq = sequenceRef.current;
+                                        for (const selKf of kfsToMove) {
+                                          const sc = seq.scenes.find((s) => s.sceneId === selKf.sceneId);
+                                          if (!sc?.keyframes) continue;
+                                          const t = sc.keyframes[selKf.trackKey];
+                                          if (!t || !t[selKf.kfIdx]) continue;
+                                          origTimes.set(`${selKf.sceneId}|${selKf.trackKey}|${selKf.kfIdx}`, t[selKf.kfIdx].time);
+                                        }
                                         // Start drag
                                         kfDragRef.current = {
                                           sceneId: scene.sceneId,
@@ -2309,6 +2357,7 @@ function Timeline({
                                           startX: e.clientX,
                                           clipLeft,
                                           clipWidth,
+                                          origTimes,
                                         };
                                         setKfDragActive(true);
                                       }}
@@ -2995,6 +3044,14 @@ export function Composer() {
         e.preventDefault();
         togglePlay();
       }
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        const frameDurationMs = 1000 / sequence.fps; // milliseconds per frame
+        const framesToMove = e.shiftKey ? 10 : 1;
+        const deltaMs = (e.key === 'ArrowLeft' ? -1 : 1) * framesToMove * frameDurationMs;
+        const newTimeMs = Math.max(0, Math.min(totalDurationMs, currentTimeMs + deltaMs));
+        handleSeek(newTimeMs);
+      }
       if (e.key === 'Escape') {
         if (selectedKfs.length > 0) {
           setSelectedKfs([]);
@@ -3006,7 +3063,7 @@ export function Composer() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedSceneIds, selectedAudioClipId, selectedKfs, togglePlay, undo, redo]);
+  }, [selectedSceneIds, selectedAudioClipId, selectedKfs, togglePlay, undo, redo, sequence.fps, currentTimeMs, totalDurationMs, handleSeek]);
 
   // ─── Canvas zoom/pan ──────────────────────────────────────────────────────
 
