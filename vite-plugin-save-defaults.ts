@@ -999,6 +999,25 @@ Use move_scene_to_lane to:
 
 For simultaneous playback, set transparent_bg on the overlay scene so the underlying scene shows through.
 
+## Keyframes (Animated Transform Properties)
+Each scene's transform properties (scale, offsetX, offsetY, opacity) can be animated over time using keyframes. Keyframes define values at specific points in normalized time (0 = start of scene, 1 = end of scene), with interpolation between them.
+
+Available tracks: transform.scale, transform.offsetX, transform.offsetY, transform.opacity
+
+Easing options: linear, easeIn, easeOut, easeInOut (default), step (holds value until next keyframe)
+
+Use set_keyframe to add/update keyframes. Common patterns:
+- **Fade in**: set opacity keyframes at t=0 v=0 and t=0.3 v=1
+- **Fade out**: set opacity keyframes at t=0.7 v=1 and t=1 v=0
+- **Scale up entrance**: set scale keyframes at t=0 v=0 easeOut and t=0.3 v=1
+- **Slide in from left**: set offsetX keyframes at t=0 v=-200 easeOut and t=0.3 v=0
+- **Bounce**: set scale keyframes at t=0 v=0.5, t=0.4 v=1.1 easeOut, t=0.6 v=0.95 easeInOut, t=0.8 v=1
+- **Pulse**: set scale keyframes at t=0 v=1, t=0.5 v=1.2, t=1 v=1
+
+You can combine keyframes across multiple tracks for rich animations (e.g., fade in + scale up + slide in simultaneously).
+
+If the state shows existing keyframes on a scene, you can modify, remove, or add more. Use clear_keyframes to remove all keyframes from a track or scene.
+
 ## Answering Questions
 You can answer questions about the timeline state without making any changes. Just respond with helpful text — NO tool calls needed. Examples:
 - "How long is my sequence?" → Calculate the total duration from the scene list and reply.
@@ -1134,6 +1153,55 @@ The current sequence state is included at the start of each user message in [SEQ
               {
                 type: 'function',
                 function: {
+                  name: 'set_keyframe',
+                  description: 'Add or update a keyframe on a scene\'s transform track. Keyframes animate transform properties (scale, position, opacity) over the scene duration. Time is normalized 0-1 (0=start, 0.5=middle, 1=end). Call multiple times to create multi-keyframe animations.',
+                  parameters: {
+                    type: 'object',
+                    properties: {
+                      scene_index: { type: 'number', description: '0-based scene index' },
+                      track: { type: 'string', enum: ['transform.scale', 'transform.offsetX', 'transform.offsetY', 'transform.opacity'], description: 'Which transform property to keyframe' },
+                      time: { type: 'number', description: 'Normalized time within the scene (0=start, 0.5=middle, 1=end)' },
+                      value: { type: 'number', description: 'Value at this keyframe. Scale: 1=100%. Offset: pixels. Opacity: 0-1.' },
+                      easing: { type: 'string', enum: ['linear', 'easeIn', 'easeOut', 'easeInOut', 'step'], description: 'Easing curve to the next keyframe. Default: easeInOut.' },
+                    },
+                    required: ['scene_index', 'track', 'time', 'value'],
+                  },
+                },
+              },
+              {
+                type: 'function',
+                function: {
+                  name: 'remove_keyframe',
+                  description: 'Remove a keyframe at a specific time from a scene\'s transform track.',
+                  parameters: {
+                    type: 'object',
+                    properties: {
+                      scene_index: { type: 'number', description: '0-based scene index' },
+                      track: { type: 'string', enum: ['transform.scale', 'transform.offsetX', 'transform.offsetY', 'transform.opacity'], description: 'Which transform track' },
+                      time: { type: 'number', description: 'Normalized time of the keyframe to remove (0-1)' },
+                    },
+                    required: ['scene_index', 'track', 'time'],
+                  },
+                },
+              },
+              {
+                type: 'function',
+                function: {
+                  name: 'clear_keyframes',
+                  description: 'Clear all keyframes from a specific track, or from all tracks on a scene.',
+                  parameters: {
+                    type: 'object',
+                    properties: {
+                      scene_index: { type: 'number', description: '0-based scene index' },
+                      track: { type: 'string', enum: ['transform.scale', 'transform.offsetX', 'transform.offsetY', 'transform.opacity'], description: 'Which track to clear. If omitted, clears ALL keyframe tracks on the scene.' },
+                    },
+                    required: ['scene_index'],
+                  },
+                },
+              },
+              {
+                type: 'function',
+                function: {
                   name: 'create_and_add_scene',
                   description: 'Generate a brand-new canvas animation from a text description and add it to the timeline. Use this when the user wants to create something that does NOT exist in the "Available animations" gallery list. The animation will be generated by AI and added as a custom code scene.',
                   parameters: {
@@ -1188,8 +1256,11 @@ The current sequence state is included at the start of each user message in [SEQ
             if (message.tool_calls && message.tool_calls.length > 0) {
               const toolCalls = message.tool_calls.map((tc) => {
                 let args: Record<string, unknown> = {};
-                try { args = JSON.parse(tc.function.arguments); } catch { args = {}; }
-                return { name: tc.function.name, arguments: args };
+                if ('function' in tc && tc.function) {
+                  try { args = JSON.parse(tc.function.arguments); } catch { args = {}; }
+                  return { name: tc.function.name, arguments: args };
+                }
+                return { name: '', arguments: {} };
               });
 
               res.statusCode = 200;

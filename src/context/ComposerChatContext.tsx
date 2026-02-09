@@ -15,7 +15,8 @@ import {
   type MutableRefObject,
 } from 'react';
 import type { Sequence, SceneEntry, SceneTransform } from '../runtime/sequence';
-import { DEFAULT_TRANSFORM } from '../runtime/sequence';
+import type { SceneKeyframeTracks, TransformTrackKey, EasingType } from '../runtime/keyframes';
+import { TRANSFORM_TRACK_KEYS, hasAnyKeyframes } from '../runtime/keyframes';
 
 // ─── Public types ────────────────────────────────────────────────────────────
 
@@ -38,6 +39,8 @@ export interface ComposerSceneInfo {
   connectedTo?: string;
   /** For connected scenes: time offset from anchor start in ms */
   connectedOffsetMs?: number;
+  /** Keyframe tracks (if any) */
+  keyframes?: SceneKeyframeTracks;
 }
 
 export interface ComposerState {
@@ -63,6 +66,12 @@ export interface ComposerActions {
   addCustomCodeScene: (code: string, label: string, config?: { durationMs?: number; width?: number; height?: number; fps?: number; background?: string }) => void;
   /** Move a scene to a different lane (0 = primary, non-zero = secondary overlay) */
   moveToLane: (sceneIndex: number, targetLane: number, anchorSceneIndex?: number, offsetMs?: number) => void;
+  /** Set (add/update) a keyframe on a scene's transform track */
+  setKeyframe: (sceneIndex: number, track: TransformTrackKey, time: number, value: number, easing?: EasingType) => void;
+  /** Remove a keyframe at a specific time from a scene's track */
+  removeKeyframe: (sceneIndex: number, track: TransformTrackKey, time: number) => void;
+  /** Clear all keyframes from a specific track, or all tracks if no track specified */
+  clearKeyframes: (sceneIndex: number, track?: TransformTrackKey) => void;
 }
 
 // ─── Context ─────────────────────────────────────────────────────────────────
@@ -163,6 +172,20 @@ export function buildSequenceStatePrompt(state: ComposerState): string {
           ? scenes.find((x) => x.sceneId === s.connectedTo)?.label || s.connectedTo
           : '(none)';
         lines.push(`      Lane: ${s.lane} — anchored to "${anchorLabel}", offset ${s.connectedOffsetMs ?? 0}ms`);
+      }
+
+      // Keyframes
+      if (s.keyframes && hasAnyKeyframes(s.keyframes)) {
+        lines.push(`      Keyframes:`);
+        for (const trackKey of TRANSFORM_TRACK_KEYS) {
+          const track = s.keyframes[trackKey];
+          if (track && track.length > 0) {
+            const kfStr = track.map(
+              (kf) => `t=${kf.time.toFixed(2)} v=${kf.value}${kf.easing && kf.easing !== 'easeInOut' ? ` ${kf.easing}` : ''}`
+            ).join(' → ');
+            lines.push(`        ${trackKey}: [${kfStr}]`);
+          }
+        }
       }
     }
   }
@@ -274,6 +297,44 @@ export async function executeComposerToolCalls(
             if (offsetMs != null && offsetMs !== 0) parts.push(`offset ${offsetMs}ms`);
             summaries.push(`Moved scene ${sceneIndex} to ${parts.join(', ')}`);
           }
+          break;
+        }
+
+        case 'set_keyframe': {
+          const args = tc.arguments as Record<string, unknown>;
+          const sceneIndex = args.scene_index as number;
+          const track = args.track as TransformTrackKey;
+          const time = args.time as number;
+          const value = args.value as number;
+          const easing = args.easing as EasingType | undefined;
+
+          actions.setKeyframe(sceneIndex, track, time, value, easing);
+          summaries.push(`Set keyframe on scene ${sceneIndex} ${track}: t=${time} v=${value}${easing ? ` ${easing}` : ''}`);
+          break;
+        }
+
+        case 'remove_keyframe': {
+          const args = tc.arguments as Record<string, unknown>;
+          const sceneIndex = args.scene_index as number;
+          const track = args.track as TransformTrackKey;
+          const time = args.time as number;
+
+          actions.removeKeyframe(sceneIndex, track, time);
+          summaries.push(`Removed keyframe from scene ${sceneIndex} ${track} at t=${time}`);
+          break;
+        }
+
+        case 'clear_keyframes': {
+          const args = tc.arguments as Record<string, unknown>;
+          const sceneIndex = args.scene_index as number;
+          const track = args.track as TransformTrackKey | undefined;
+
+          actions.clearKeyframes(sceneIndex, track);
+          summaries.push(
+            track
+              ? `Cleared keyframes from scene ${sceneIndex} ${track}`
+              : `Cleared all keyframes from scene ${sceneIndex}`
+          );
           break;
         }
 

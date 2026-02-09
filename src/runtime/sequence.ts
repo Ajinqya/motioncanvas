@@ -8,6 +8,25 @@
 
 import type { AnyAnimationDefinition, AnimationDefinition, RenderContext, AudioData } from './types';
 import { isSimpleAnimation } from './types';
+import { evaluateTransformKeyframes, type SceneKeyframeTracks } from './keyframes';
+export type { SceneKeyframeTracks } from './keyframes';
+export {
+  TRANSFORM_TRACK_KEYS,
+  TRANSFORM_TRACK_LABELS,
+  hasAnyKeyframes,
+  getTrackKeyframeCount,
+  setKeyframe,
+  removeKeyframe,
+  clearTrack,
+  clearAllKeyframes,
+  getTransformValue,
+  evaluateTrack,
+  evaluateTransformKeyframes,
+  type TransformTrackKey,
+  type KeyframeTrack,
+  type Keyframe,
+  type EasingType,
+} from './keyframes';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -93,6 +112,8 @@ export interface SceneEntry {
   customCode?: string;
   /** Configuration for the custom code scene (dimensions, duration, background, etc.) */
   customCodeConfig?: CustomCodeConfig;
+  /** Keyframe tracks for animating transform properties over the scene duration */
+  keyframes?: SceneKeyframeTracks;
 }
 
 export interface AudioClipEntry {
@@ -362,8 +383,14 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
 
     const freq = audioFreqBuffers.get(clipId)!;
     const wave = audioWaveBuffers.get(clipId)!;
-    analyser.getByteFrequencyData(freq);
-    analyser.getByteTimeDomainData(wave);
+    // Create new arrays with proper ArrayBuffer type
+    const freqArray = new Uint8Array(freq.length);
+    const waveArray = new Uint8Array(wave.length);
+    analyser.getByteFrequencyData(freqArray);
+    analyser.getByteTimeDomainData(waveArray);
+    // Copy back to the original buffers for consistency
+    freq.set(freqArray);
+    wave.set(waveArray);
 
     const binCount = analyser.frequencyBinCount;
     const bassEnd = Math.floor(binCount * 0.05);
@@ -576,7 +603,9 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
     }
 
     const params = scene.params || {};
-    const transform = scene.transform || DEFAULT_TRANSFORM;
+    const baseTransform = scene.transform || DEFAULT_TRANSFORM;
+    // Evaluate keyframes at the current local progress to get animated transform values
+    const transform = evaluateTransformKeyframes(scene.keyframes, localProgress, baseTransform);
     const transparentBg = scene.transparentBg ?? false;
 
     targetCtx.save();

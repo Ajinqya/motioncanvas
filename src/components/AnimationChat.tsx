@@ -23,6 +23,7 @@ import {
   buildSequenceStatePrompt,
   executeComposerToolCalls,
 } from '../context/ComposerChatContext';
+import { extractModuleConfig } from '../runtime/custom-code';
 
 // ── Types ────────────────────────────────────────────────────
 interface ChatMessage {
@@ -35,6 +36,10 @@ interface ChatMessage {
   animationPath?: string;
   animationName?: string;
   isError?: boolean;
+  /** Generated animation code (for "Add to Timeline" in production) */
+  animationCode?: string;
+  /** Extracted config from the generated code */
+  animationCodeConfig?: { name?: string; durationMs?: number; width?: number; height?: number; fps?: number; background?: string };
 }
 
 interface AnimationInfo {
@@ -82,6 +87,9 @@ export function AnimationChat() {
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // Pending scene to add to timeline after navigating to Composer
+  const pendingSceneRef = useRef<{ code: string; name: string; config?: { durationMs?: number; width?: number; height?: number; fps?: number; background?: string } } | null>(null);
+
   // ── Derived ──────────────────────────────────────────────
   const selectedAnimation = animations.find((a) => a.id === selectedAnimationId) ?? null;
 
@@ -113,6 +121,24 @@ export function AnimationChat() {
   }, [isOpen, routeAnimationId, animations.length, isOnComposePage, isComposerActive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Effects ──────────────────────────────────────────────
+  // Cmd+K / Ctrl+K to toggle chat
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsOpen((prev) => {
+          if (!prev) {
+            // Opening — focus input after panel appears
+            setTimeout(() => inputRef.current?.focus(), 150);
+          }
+          return !prev;
+        });
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -133,6 +159,15 @@ export function AnimationChat() {
       .then((data: AnimationInfo[]) => setAnimations(data))
       .catch(() => {});
   }, [isOpen]);
+
+  // Process pending scene when Composer becomes active
+  useEffect(() => {
+    if (isComposerActive && actionsRef.current && pendingSceneRef.current) {
+      const { code, name, config } = pendingSceneRef.current;
+      pendingSceneRef.current = null;
+      actionsRef.current.addCustomCodeScene(code, name, config);
+    }
+  }, [isComposerActive, actionsRef]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -268,9 +303,27 @@ export function AnimationChat() {
 
         let replyContent = data.reply || data.description || 'Animation created!';
         const hasPath = !!data.path;
+        let addedToTimeline = false;
 
+        // Extract config from generated code (used for timeline addition)
+        const codeConfig = data.code ? extractModuleConfig(data.code) : null;
+
+        // In production (no file path), try to add directly to timeline
         if (data.success && data.code && !hasPath) {
-          replyContent = `${data.description || 'Generated animation!'}\n\nTo add this to your gallery, run the dev server locally and use the chat there.`;
+          if (isComposerActive && actionsRef.current) {
+            // On the Composer page — add directly to timeline
+            actionsRef.current.addCustomCodeScene(data.code, data.name || 'AI Generated', {
+              durationMs: codeConfig?.durationMs ?? 3000,
+              width: codeConfig?.width,
+              height: codeConfig?.height,
+              fps: codeConfig?.fps,
+              background: codeConfig?.background,
+            });
+            replyContent = `${data.description || 'Generated animation!'}\n\nAdded to your timeline as a clip.`;
+            addedToTimeline = true;
+          } else {
+            replyContent = data.description || 'Generated animation!';
+          }
         }
 
         const assistantMessage: ChatMessage = {
@@ -281,6 +334,16 @@ export function AnimationChat() {
           animationPath: hasPath ? data.path : undefined,
           animationName: data.success ? data.name : undefined,
           isError: !data.success,
+          // Store code for "Add to Timeline" button (only when no path and not already added)
+          animationCode: (data.success && data.code && !hasPath && !addedToTimeline) ? data.code : undefined,
+          animationCodeConfig: (data.success && data.code && !hasPath && !addedToTimeline) ? {
+            name: data.name,
+            durationMs: codeConfig?.durationMs ?? 3000,
+            width: codeConfig?.width,
+            height: codeConfig?.height,
+            fps: codeConfig?.fps,
+            background: codeConfig?.background,
+          } : undefined,
         };
 
         setMessages((prev) => [...prev, assistantMessage]);
@@ -307,7 +370,7 @@ export function AnimationChat() {
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, apiKey, messages, mode, selectedAnimation, actionsRef]);
+  }, [input, isLoading, apiKey, messages, mode, selectedAnimation, actionsRef, isComposerActive]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -353,6 +416,18 @@ export function AnimationChat() {
     setAnimationSearch('');
     setTimeout(() => inputRef.current?.focus(), 0);
   };
+
+  // Handler: Add generated animation to the Composer timeline
+  const addToTimeline = useCallback((code: string, name: string, config?: { durationMs?: number; width?: number; height?: number; fps?: number; background?: string }) => {
+    if (actionsRef.current) {
+      // Composer is already active — add directly
+      actionsRef.current.addCustomCodeScene(code, name, config);
+    } else {
+      // Queue and navigate to Composer
+      pendingSceneRef.current = { code, name, config };
+      navigate('/compose');
+    }
+  }, [actionsRef, navigate]);
 
   // ── Mode label for the toggle button ─────────────────────
   const modeLabel =
@@ -627,6 +702,25 @@ export function AnimationChat() {
                       View "{message.animationName}"
                     </button>
                   )}
+                  {message.animationCode && (
+                    <button
+                      onClick={() => {
+                        addToTimeline(
+                          message.animationCode!,
+                          message.animationCodeConfig?.name || message.animationName || 'AI Generated',
+                          message.animationCodeConfig
+                        );
+                      }}
+                      className={cn(
+                        'mt-2 flex items-center gap-1.5 text-xs font-medium',
+                        'px-3 py-1.5 rounded-lg transition-colors',
+                        'bg-violet-500/10 hover:bg-violet-500/20 text-violet-600 dark:text-violet-400'
+                      )}
+                    >
+                      <Film className="h-3 w-3" />
+                      Add to Timeline
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -789,16 +883,22 @@ export function AnimationChat() {
       {/* Floating toggle button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
+        title="AI Chat (⌘K)"
         className={cn(
-          'fixed bottom-6 right-6 z-50 h-12 w-12 rounded-full',
+          'fixed bottom-6 right-6 z-50 rounded-full',
           'bg-primary text-primary-foreground shadow-lg',
-          'flex items-center justify-center',
-          'hover:scale-105 active:scale-95 transition-all duration-200',
+          'flex items-center gap-1.5 transition-all duration-200',
+          'hover:scale-105 active:scale-95',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-          isOpen && 'opacity-0 pointer-events-none scale-75'
+          isOpen ? 'opacity-0 pointer-events-none scale-75 h-12 w-12 justify-center' : 'h-12 px-4'
         )}
       >
-        <Sparkles className="h-5 w-5" />
+        <Sparkles className="h-5 w-5 shrink-0" />
+        {!isOpen && (
+          <kbd className="text-[10px] font-medium opacity-70 bg-primary-foreground/20 rounded px-1.5 py-0.5">
+            ⌘K
+          </kbd>
+        )}
       </button>
     </>
   );

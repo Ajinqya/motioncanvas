@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAnimationRegistry } from '../animations/registry';
 import { useDeletedAnimations } from '../hooks/useDeletedAnimations';
@@ -10,6 +10,15 @@ import {
   getSceneTimings,
   getSequenceDurationMs,
   DEFAULT_TRANSFORM,
+  TRANSFORM_TRACK_KEYS,
+  TRANSFORM_TRACK_LABELS,
+  hasAnyKeyframes,
+  getTrackKeyframeCount,
+  setKeyframe,
+  removeKeyframe,
+  clearTrack,
+  getTransformValue,
+  evaluateTransformKeyframes,
   type Sequence,
   type SceneEntry,
   type SceneTransform,
@@ -17,6 +26,8 @@ import {
   type SequencePlayerControls,
   type TransitionType,
   type CustomCodeConfig,
+  type TransformTrackKey,
+  type EasingType,
 } from '../runtime/sequence';
 import type { AnyAnimationDefinition, AnimationDefinition } from '../runtime/types';
 import { isSimpleAnimation } from '../runtime/types';
@@ -67,6 +78,9 @@ import {
   AlertCircle,
   Check,
   Undo2,
+  Diamond,
+  ChevronRight,
+  ChevronDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -142,14 +156,21 @@ const SCENE_COLORS = [
   'hsl(120, 55%, 45%)',
 ];
 
-/** Compute pixel bounding box for a scene on the sequence canvas */
+/** Compute pixel bounding box for a scene on the sequence canvas.
+ *  When `localProgress` is provided, evaluates keyframes to get the
+ *  animated transform at that point in time; otherwise uses the base transform. */
 function computeSceneBBox(
   scene: SceneEntry,
   animation: AnyAnimationDefinition,
   seqW: number,
   seqH: number,
+  localProgress?: number,
 ) {
-  const transform = scene.transform || DEFAULT_TRANSFORM;
+  const baseTransform = scene.transform || DEFAULT_TRANSFORM;
+  const transform =
+    localProgress !== undefined
+      ? evaluateTransformKeyframes(scene.keyframes, localProgress, baseTransform)
+      : baseTransform;
   const animW = animation.width ?? 800;
   const animH = animation.height ?? 600;
   const fitScale = Math.min(seqW / animW, seqH / animH);
@@ -158,6 +179,17 @@ function computeSceneBBox(
   const x = (seqW / 2 + transform.offsetX) - contentW / 2;
   const y = (seqH / 2 + transform.offsetY) - contentH / 2;
   return { x, y, width: contentW, height: contentH };
+}
+
+/** Helper to compute local progress (0–1) for a scene at a given absolute time */
+function getSceneLocalProgress(
+  currentTimeMs: number,
+  sceneTiming: { startMs: number; endMs: number },
+  sceneDurationMs: number,
+): number {
+  if (sceneDurationMs <= 0) return 0;
+  const localMs = Math.max(0, Math.min(currentTimeMs - sceneTiming.startMs, sceneDurationMs));
+  return localMs / sceneDurationMs;
 }
 
 // ─── Sequence Settings Sidebar ────────────────────────────────────────────────
@@ -250,6 +282,14 @@ function SequenceSettingsSidebar({
 
 // ─── Scene Settings Sidebar ──────────────────────────────────────────────────
 
+const EASING_OPTIONS: { value: EasingType; label: string }[] = [
+  { value: 'linear', label: 'Linear' },
+  { value: 'easeIn', label: 'Ease In' },
+  { value: 'easeOut', label: 'Ease Out' },
+  { value: 'easeInOut', label: 'Ease In Out' },
+  { value: 'step', label: 'Step (Hold)' },
+];
+
 function SceneSettingsSidebar({
   scene,
   animationsMap,
@@ -257,6 +297,10 @@ function SceneSettingsSidebar({
   onUpdate,
   onDuplicate,
   onRemove,
+  currentTimeMs,
+  sceneTiming,
+  selectedKfs,
+  onSetSelectedKfs: _onSetSelectedKfs,
 }: {
   scene: SceneEntry;
   animationsMap: Map<string, AnyAnimationDefinition>;
@@ -264,9 +308,26 @@ function SceneSettingsSidebar({
   onUpdate: (updates: Partial<SceneEntry>) => void;
   onDuplicate: () => void;
   onRemove: () => void;
+  currentTimeMs: number;
+  sceneTiming?: { startMs: number; endMs: number };
+  selectedKfs: SelectedKf[];
+  onSetSelectedKfs: React.Dispatch<React.SetStateAction<SelectedKf[]>>;
 }) {
   const animation = animationsMap.get(scene.animationId);
   const transform = scene.transform || DEFAULT_TRANSFORM;
+
+  // Keyframe helpers (localProgress needed early for animatedTransform)
+  const localProgress = useMemo(() => {
+    if (!sceneTiming || scene.durationMs <= 0) return 0;
+    const localMs = Math.max(0, Math.min(currentTimeMs - sceneTiming.startMs, scene.durationMs));
+    return localMs / scene.durationMs;
+  }, [currentTimeMs, sceneTiming, scene.durationMs]);
+
+  // Interpolated transform at the current playhead (reflects keyframe animation)
+  const animatedTransform = useMemo(
+    () => evaluateTransformKeyframes(scene.keyframes, localProgress, transform),
+    [scene.keyframes, localProgress, transform]
+  );
 
   const hasParams = animation && !isSimpleAnimation(animation);
   const fullAnim = hasParams
@@ -290,9 +351,50 @@ function SceneSettingsSidebar({
 
   const handleTransformChange = useCallback(
     (field: keyof SceneTransform, value: number) => {
-      onUpdate({ transform: { ...transform, [field]: value } });
+      const trackKey = `transform.${field}` as TransformTrackKey;
+      const hasKfs = getTrackKeyframeCount(scene.keyframes, trackKey) > 0;
+
+      if (hasKfs) {
+        // Track has keyframes — auto-add/update keyframe at playhead, don't touch base
+        const newTracks = setKeyframe(scene.keyframes, trackKey, localProgress, value);
+        onUpdate({ keyframes: newTracks });
+      } else {
+        // No keyframes — update base transform directly
+        onUpdate({ transform: { ...transform, [field]: value } });
+      }
     },
-    [transform, onUpdate]
+    [transform, onUpdate, scene.keyframes, localProgress]
+  );
+
+  const addTransformKeyframe = useCallback(
+    (trackKey: TransformTrackKey) => {
+      // Use the animated (interpolated) value at the current playhead, not the base transform,
+      // so that the keyframe captures what the user currently sees.
+      const field = trackKey.replace('transform.', '') as keyof SceneTransform;
+      const value = animatedTransform[field] as number;
+      const newTracks = setKeyframe(scene.keyframes, trackKey, localProgress, value);
+      onUpdate({ keyframes: newTracks });
+    },
+    [scene.keyframes, animatedTransform, localProgress, onUpdate]
+  );
+
+  const hasKeyframeAt = useCallback(
+    (trackKey: TransformTrackKey) => {
+      const track = scene.keyframes?.[trackKey];
+      if (!track) return false;
+      return track.some((kf) => Math.abs(kf.time - localProgress) < 0.005);
+    },
+    [scene.keyframes, localProgress]
+  );
+
+  const removeTransformKeyframeAtPlayhead = useCallback(
+    (trackKey: TransformTrackKey) => {
+      const newTracks = removeKeyframe(scene.keyframes, trackKey, localProgress);
+      onUpdate({
+        keyframes: Object.keys(newTracks).length > 0 ? newTracks : undefined,
+      });
+    },
+    [scene.keyframes, localProgress, onUpdate]
   );
 
   return (
@@ -365,45 +467,192 @@ function SceneSettingsSidebar({
             <Label className="text-xs font-semibold">Transform</Label>
           </div>
           <Button variant="ghost" size="sm" className="h-6 text-[10px] px-2"
-            onClick={() => onUpdate({ transform: { ...DEFAULT_TRANSFORM } })}>
+            onClick={() => onUpdate({ transform: { ...DEFAULT_TRANSFORM }, keyframes: undefined })}>
             <RotateCw className="h-3 w-3" /> Reset
           </Button>
         </div>
         <div className="space-y-3">
+          {/* Scale */}
           <div>
             <div className="flex items-center justify-between">
-              <Label className="text-xs text-muted-foreground">Scale</Label>
-              <span className="text-xs text-muted-foreground tabular-nums">{Math.round(transform.scale * 100)}%</span>
+              <div className="flex items-center gap-1">
+                <Label className="text-xs text-muted-foreground">Scale</Label>
+                <button
+                  className="p-0 leading-none"
+                  title={hasKeyframeAt('transform.scale')
+                    ? 'Remove keyframe at playhead'
+                    : `Add keyframe at ${(localProgress * 100).toFixed(0)}%`}
+                  onClick={() =>
+                    hasKeyframeAt('transform.scale')
+                      ? removeTransformKeyframeAtPlayhead('transform.scale')
+                      : addTransformKeyframe('transform.scale')
+                  }
+                >
+                  <Diamond className={`h-3 w-3 ${
+                    hasKeyframeAt('transform.scale')
+                      ? 'text-yellow-500 fill-yellow-500'
+                      : getTrackKeyframeCount(scene.keyframes, 'transform.scale') > 0
+                        ? 'text-yellow-500/60'
+                        : 'text-muted-foreground/40 hover:text-muted-foreground'
+                  } transition-colors`} />
+                </button>
+              </div>
+              <span className="text-xs text-muted-foreground tabular-nums">{Math.round(animatedTransform.scale * 100)}%</span>
             </div>
-            <Slider min={0.1} max={3} step={0.05} value={[transform.scale]}
+            <Slider min={0.1} max={3} step={0.05} value={[animatedTransform.scale]}
               onValueChange={([v]) => handleTransformChange('scale', v)} className="mt-1" />
           </div>
+          {/* Position X */}
           <div>
             <div className="flex items-center justify-between">
-              <Label className="text-xs text-muted-foreground">Position X</Label>
-              <span className="text-xs text-muted-foreground tabular-nums">{transform.offsetX}px</span>
+              <div className="flex items-center gap-1">
+                <Label className="text-xs text-muted-foreground">Position X</Label>
+                <button
+                  className="p-0 leading-none"
+                  title={hasKeyframeAt('transform.offsetX')
+                    ? 'Remove keyframe at playhead'
+                    : `Add keyframe at ${(localProgress * 100).toFixed(0)}%`}
+                  onClick={() =>
+                    hasKeyframeAt('transform.offsetX')
+                      ? removeTransformKeyframeAtPlayhead('transform.offsetX')
+                      : addTransformKeyframe('transform.offsetX')
+                  }
+                >
+                  <Diamond className={`h-3 w-3 ${
+                    hasKeyframeAt('transform.offsetX')
+                      ? 'text-yellow-500 fill-yellow-500'
+                      : getTrackKeyframeCount(scene.keyframes, 'transform.offsetX') > 0
+                        ? 'text-yellow-500/60'
+                        : 'text-muted-foreground/40 hover:text-muted-foreground'
+                  } transition-colors`} />
+                </button>
+              </div>
+              <span className="text-xs text-muted-foreground tabular-nums">{Math.round(animatedTransform.offsetX)}px</span>
             </div>
-            <Slider min={-960} max={960} step={1} value={[transform.offsetX]}
+            <Slider min={-960} max={960} step={1} value={[animatedTransform.offsetX]}
               onValueChange={([v]) => handleTransformChange('offsetX', v)} className="mt-1" />
           </div>
+          {/* Position Y */}
           <div>
             <div className="flex items-center justify-between">
-              <Label className="text-xs text-muted-foreground">Position Y</Label>
-              <span className="text-xs text-muted-foreground tabular-nums">{transform.offsetY}px</span>
+              <div className="flex items-center gap-1">
+                <Label className="text-xs text-muted-foreground">Position Y</Label>
+                <button
+                  className="p-0 leading-none"
+                  title={hasKeyframeAt('transform.offsetY')
+                    ? 'Remove keyframe at playhead'
+                    : `Add keyframe at ${(localProgress * 100).toFixed(0)}%`}
+                  onClick={() =>
+                    hasKeyframeAt('transform.offsetY')
+                      ? removeTransformKeyframeAtPlayhead('transform.offsetY')
+                      : addTransformKeyframe('transform.offsetY')
+                  }
+                >
+                  <Diamond className={`h-3 w-3 ${
+                    hasKeyframeAt('transform.offsetY')
+                      ? 'text-yellow-500 fill-yellow-500'
+                      : getTrackKeyframeCount(scene.keyframes, 'transform.offsetY') > 0
+                        ? 'text-yellow-500/60'
+                        : 'text-muted-foreground/40 hover:text-muted-foreground'
+                  } transition-colors`} />
+                </button>
+              </div>
+              <span className="text-xs text-muted-foreground tabular-nums">{Math.round(animatedTransform.offsetY)}px</span>
             </div>
-            <Slider min={-540} max={540} step={1} value={[transform.offsetY]}
+            <Slider min={-540} max={540} step={1} value={[animatedTransform.offsetY]}
               onValueChange={([v]) => handleTransformChange('offsetY', v)} className="mt-1" />
           </div>
+          {/* Opacity */}
           <div>
             <div className="flex items-center justify-between">
-              <Label className="text-xs text-muted-foreground">Opacity</Label>
-              <span className="text-xs text-muted-foreground tabular-nums">{Math.round(transform.opacity * 100)}%</span>
+              <div className="flex items-center gap-1">
+                <Label className="text-xs text-muted-foreground">Opacity</Label>
+                <button
+                  className="p-0 leading-none"
+                  title={hasKeyframeAt('transform.opacity')
+                    ? 'Remove keyframe at playhead'
+                    : `Add keyframe at ${(localProgress * 100).toFixed(0)}%`}
+                  onClick={() =>
+                    hasKeyframeAt('transform.opacity')
+                      ? removeTransformKeyframeAtPlayhead('transform.opacity')
+                      : addTransformKeyframe('transform.opacity')
+                  }
+                >
+                  <Diamond className={`h-3 w-3 ${
+                    hasKeyframeAt('transform.opacity')
+                      ? 'text-yellow-500 fill-yellow-500'
+                      : getTrackKeyframeCount(scene.keyframes, 'transform.opacity') > 0
+                        ? 'text-yellow-500/60'
+                        : 'text-muted-foreground/40 hover:text-muted-foreground'
+                  } transition-colors`} />
+                </button>
+              </div>
+              <span className="text-xs text-muted-foreground tabular-nums">{Math.round(animatedTransform.opacity * 100)}%</span>
             </div>
-            <Slider min={0} max={1} step={0.01} value={[transform.opacity]}
+            <Slider min={0} max={1} step={0.01} value={[animatedTransform.opacity]}
               onValueChange={([v]) => handleTransformChange('opacity', v)} className="mt-1" />
           </div>
         </div>
       </div>
+
+      {/* Keyframe easing — shown when keyframes belonging to this scene are selected */}
+      {selectedKfs.length > 0 && selectedKfs.some((k) => k.sceneId === scene.sceneId) && (() => {
+        const sceneKfs = selectedKfs.filter((k) => k.sceneId === scene.sceneId);
+        // Read the easing from the first selected keyframe (they may differ, show first)
+        const firstKf = sceneKfs[0];
+        const track = scene.keyframes?.[firstKf.trackKey];
+        const kfData = track?.[firstKf.kfIdx];
+        const currentEasing = kfData?.easing ?? 'easeInOut';
+        const mixed = sceneKfs.some((k) => {
+          const t = scene.keyframes?.[k.trackKey];
+          return t?.[k.kfIdx] && (t[k.kfIdx].easing ?? 'easeInOut') !== currentEasing;
+        });
+
+        return (
+          <div className="border rounded-lg p-3 bg-muted/30">
+            <div className="flex items-center gap-1.5 mb-2">
+              <Diamond className="h-3.5 w-3.5 text-yellow-500 fill-yellow-500" />
+              <Label className="text-xs font-semibold">
+                {sceneKfs.length === 1
+                  ? `Keyframe — ${TRANSFORM_TRACK_LABELS[firstKf.trackKey]} at ${((kfData?.time ?? 0) * 100).toFixed(0)}%`
+                  : `${sceneKfs.length} Keyframes Selected`}
+              </Label>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[10px] text-muted-foreground uppercase tracking-wider">Interpolation to Next</Label>
+              <div className="flex flex-wrap gap-1">
+                {EASING_OPTIONS.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    className={`px-2 py-1 text-[10px] rounded border transition-colors ${
+                      !mixed && currentEasing === value
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'bg-muted/50 hover:bg-muted border-border'
+                    }`}
+                    onClick={() => {
+                      // Apply easing to all selected keyframes
+                      let newKfs = scene.keyframes;
+                      for (const k of sceneKfs) {
+                        const t = newKfs?.[k.trackKey];
+                        if (!t || !t[k.kfIdx]) continue;
+                        const updated = [...t];
+                        updated[k.kfIdx] = { ...updated[k.kfIdx], easing: value };
+                        newKfs = { ...newKfs, [k.trackKey]: updated };
+                      }
+                      onUpdate({ keyframes: newKfs });
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {mixed && (
+                <p className="text-[10px] text-muted-foreground italic">Mixed easings — click to unify</p>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Transparent background */}
       {animation?.background && (
@@ -692,6 +941,8 @@ function PlayheadSvg({ height }: { height: number }) {
   );
 }
 
+type SelectedKf = { sceneId: string; trackKey: TransformTrackKey; kfIdx: number };
+
 function Timeline({
   sequence,
   timings,
@@ -701,6 +952,8 @@ function Timeline({
   pingPong,
   selectedSceneIds,
   selectedAudioClipId,
+  selectedKfs,
+  onSetSelectedKfs,
   onSelectScene,
   onSelectAudioClip,
   onMarqueeSelect,
@@ -723,6 +976,8 @@ function Timeline({
   pingPong: boolean;
   selectedSceneIds: Set<string>;
   selectedAudioClipId: string | null;
+  selectedKfs: SelectedKf[];
+  onSetSelectedKfs: React.Dispatch<React.SetStateAction<SelectedKf[]>>;
   onSelectScene: (id: string | null, additive?: boolean) => void;
   onSelectAudioClip: (id: string | null) => void;
   onMarqueeSelect?: (ids: string[], additive: boolean) => void;
@@ -757,6 +1012,45 @@ function Timeline({
   const [audioDragActive, setAudioDragActive] = useState(false);
   const [seekDragging, setSeekDragging] = useState(false);
   const [timelineZoom, setTimelineZoom] = useState(TIMELINE_DEFAULT_ZOOM);
+
+  // ── Keyframe track expansion state ──
+  const [expandedKeyframeScenes, setExpandedKeyframeScenes] = useState<Set<string>>(new Set());
+  const toggleKeyframeExpansion = useCallback((sceneId: string) => {
+    setExpandedKeyframeScenes((prev) => {
+      const next = new Set(prev);
+      if (next.has(sceneId)) next.delete(sceneId);
+      else next.add(sceneId);
+      return next;
+    });
+  }, []);
+
+  // ── Selected keyframe helpers ──
+  const isKfSelected = useCallback(
+    (sceneId: string, trackKey: TransformTrackKey, kfIdx: number) =>
+      selectedKfs.some((k) => k.sceneId === sceneId && k.trackKey === trackKey && k.kfIdx === kfIdx),
+    [selectedKfs]
+  );
+
+  // ── Keyframe drag state ──
+  const kfDragRef = useRef<{
+    sceneId: string;
+    trackKey: TransformTrackKey;
+    kfIdx: number;
+    originalTime: number;
+    startX: number;
+    clipLeft: number;
+    clipWidth: number;
+  } | null>(null);
+  const [kfDragActive, setKfDragActive] = useState(false);
+
+  // ── Keyframe marquee selection ──
+  const kfMarqueeRef = useRef<{
+    startX: number;
+    startY: number;
+    scrollEl: HTMLElement;
+  } | null>(null);
+  const [kfMarqueeActive, setKfMarqueeActive] = useState(false);
+  const [kfMarqueeRect, setKfMarqueeRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
   // ── Custom clip drag state (replaces HTML5 DnD for precision) ──
   // All mutable drag data lives in a ref so the mousemove effect stays stable.
@@ -805,7 +1099,23 @@ function Timeline({
     return Array.from(set).sort((a, b) => b - a);
   }, [sequence.scenes, sequence.audioClips]);
 
-  const trackContentHeight = Math.max(100, 24 + lanes.length * 40);
+  // Extra height for expanded keyframe tracks: 22px header per track + 22px diamond strip if has keyframes
+  const expandedKeyframeHeight = useMemo(() => {
+    let extra = 0;
+    for (const sceneId of expandedKeyframeScenes) {
+      const scene = sequence.scenes.find((s) => s.sceneId === sceneId);
+      if (!scene) continue;
+      for (const trackKey of TRANSFORM_TRACK_KEYS) {
+        extra += 22; // header row always visible
+        if ((scene.keyframes?.[trackKey]?.length ?? 0) > 0) {
+          extra += 22; // diamond row when track has keyframes
+        }
+      }
+    }
+    return extra;
+  }, [expandedKeyframeScenes, sequence.scenes]);
+
+  const trackContentHeight = Math.max(100, 24 + lanes.length * 40 + expandedKeyframeHeight);
 
   // Audio clips grouped by lane
   const audioClipsByLane = useMemo(() => {
@@ -872,6 +1182,33 @@ function Timeline({
     return ms;
   }, [totalDurationMs, pxPerMs, timelineZoom, frameDurationMs]);
   xToMsRef.current = xToMs;
+
+  // Snap seek position to nearby keyframe absolute times
+  const snapSeekToKeyframes = useCallback((rawMs: number): number => {
+    const thresholdMs = SNAP_THRESHOLD_PX / pxPerMs;
+    let bestMs = rawMs;
+    let bestDist = thresholdMs;
+    const tms = timings;
+    for (let i = 0; i < sequence.scenes.length; i++) {
+      const scene = sequence.scenes[i];
+      if (!scene.keyframes || !tms[i]) continue;
+      for (const trackKey of TRANSFORM_TRACK_KEYS) {
+        const track = scene.keyframes[trackKey];
+        if (!track) continue;
+        for (const kf of track) {
+          const kfMs = tms[i].startMs + kf.time * scene.durationMs;
+          const dist = Math.abs(rawMs - kfMs);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestMs = kfMs;
+          }
+        }
+      }
+    }
+    return bestMs;
+  }, [pxPerMs, sequence.scenes, timings]);
+  const snapSeekRef = useRef(snapSeekToKeyframes);
+  snapSeekRef.current = snapSeekToKeyframes;
 
   // ── Refs for snap logic (so the mousemove effect doesn't need re-attachment) ──
   const pxPerMsRef = useRef(pxPerMs);
@@ -1051,17 +1388,20 @@ function Timeline({
     };
   }, [clipDragActive]); // stable — only fires on start/stop
 
-  // Handle seek by clicking on ruler
+  // Handle seek by clicking on ruler (snaps to keyframe positions)
   const handleRulerClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    onSeek(xToMs(e.clientX, e.currentTarget.closest('[data-timeline-scroll]') as HTMLElement || e.currentTarget));
-  }, [xToMs, onSeek]);
+    const ms = xToMs(e.clientX, e.currentTarget.closest('[data-timeline-scroll]') as HTMLElement || e.currentTarget);
+    onSeek(snapSeekToKeyframes(ms));
+    onSetSelectedKfs([]);
+  }, [xToMs, onSeek, snapSeekToKeyframes, onSetSelectedKfs]);
 
-  // Seek drag
+  // Seek drag (with keyframe snap)
   useEffect(() => {
     if (!seekDragging) return;
     const handleMove = (e: MouseEvent) => {
       if (!timelineRef.current) return;
-      onSeek(xToMs(e.clientX, timelineRef.current));
+      const ms = xToMsRef.current(e.clientX, timelineRef.current);
+      onSeek(snapSeekRef.current(ms));
     };
     const handleUp = () => setSeekDragging(false);
     window.addEventListener('mousemove', handleMove);
@@ -1070,7 +1410,142 @@ function Timeline({
       window.removeEventListener('mousemove', handleMove);
       window.removeEventListener('mouseup', handleUp);
     };
-  }, [seekDragging, xToMs, onSeek]);
+  }, [seekDragging, onSeek]);
+
+  // ── Keyframe diamond drag (moves all selected keyframes together) ──
+  useEffect(() => {
+    if (!kfDragActive) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const d = kfDragRef.current;
+      if (!d) return;
+      const dx = e.clientX - d.startX;
+      const timeDelta = dx / d.clipWidth;
+      const seq = sequenceRef.current;
+      const kfs = selectedKfs.length > 0 ? selectedKfs : [{ sceneId: d.sceneId, trackKey: d.trackKey, kfIdx: d.kfIdx }];
+
+      // Build updated scenes with all selected keyframes moved
+      const updatedSceneMap = new Map<string, SceneEntry>();
+      for (const kf of kfs) {
+        let scene = updatedSceneMap.get(kf.sceneId) || seq.scenes.find((s) => s.sceneId === kf.sceneId);
+        if (!scene?.keyframes) continue;
+        const track = scene.keyframes[kf.trackKey];
+        if (!track || !track[kf.kfIdx]) continue;
+        const origTime = track[kf.kfIdx].time;
+        const newTime = Math.max(0, Math.min(1, origTime + timeDelta));
+        const newTrack = [...track];
+        newTrack[kf.kfIdx] = { ...newTrack[kf.kfIdx], time: newTime };
+        const updatedScene = { ...scene, keyframes: { ...scene.keyframes, [kf.trackKey]: newTrack } };
+        updatedSceneMap.set(kf.sceneId, updatedScene);
+      }
+
+      // Sort tracks and update indices for selection
+      const newSelectedKfs: SelectedKf[] = [];
+      for (const [sceneId, scene] of updatedSceneMap) {
+        for (const trackKey of TRANSFORM_TRACK_KEYS) {
+          const track = scene.keyframes?.[trackKey];
+          if (!track) continue;
+          // Capture original times before sorting
+          const timesBeforeSort = track.map((kf) => kf.time);
+          track.sort((a, b) => a.time - b.time);
+          // Re-map selected kf indices after sort
+          for (const selKf of kfs) {
+            if (selKf.sceneId !== sceneId || selKf.trackKey !== trackKey) continue;
+            const targetTime = timesBeforeSort[selKf.kfIdx];
+            const newIdx = track.findIndex((kf) => Math.abs(kf.time - targetTime) < 0.0001);
+            if (newIdx >= 0) {
+              newSelectedKfs.push({ sceneId, trackKey, kfIdx: newIdx });
+            }
+          }
+        }
+        onUpdateScene(sceneId, { keyframes: scene.keyframes });
+      }
+
+      if (newSelectedKfs.length > 0) {
+        onSetSelectedKfs(newSelectedKfs);
+        // Also update the drag ref's index for the primary dragged keyframe
+        const primaryNew = newSelectedKfs.find(
+          (k) => k.sceneId === d.sceneId && k.trackKey === d.trackKey
+        );
+        if (primaryNew) d.kfIdx = primaryNew.kfIdx;
+      }
+    };
+    const handleMouseUp = () => {
+      kfDragRef.current = null;
+      setKfDragActive(false);
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [kfDragActive, onUpdateScene, selectedKfs, onSetSelectedKfs]);
+
+  // (Delete / Escape for selected keyframes is now handled by the Composer-level keyboard handler)
+
+  // ── Keyframe marquee selection drag ──
+  useEffect(() => {
+    if (!kfMarqueeActive) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const m = kfMarqueeRef.current;
+      if (!m) return;
+      const scrollRect = m.scrollEl.getBoundingClientRect();
+      const x1 = Math.min(m.startX, e.clientX) - scrollRect.left + m.scrollEl.scrollLeft;
+      const y1 = Math.min(m.startY, e.clientY) - scrollRect.top + m.scrollEl.scrollTop;
+      const x2 = Math.max(m.startX, e.clientX) - scrollRect.left + m.scrollEl.scrollLeft;
+      const y2 = Math.max(m.startY, e.clientY) - scrollRect.top + m.scrollEl.scrollTop;
+      setKfMarqueeRect({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 });
+    };
+    const handleMouseUp = (e: MouseEvent) => {
+      const m = kfMarqueeRef.current;
+      if (!m) { setKfMarqueeActive(false); setKfMarqueeRect(null); return; }
+      // Find all keyframe diamonds within the marquee rectangle
+      const diamonds = m.scrollEl.querySelectorAll('[data-kf-diamond]');
+      const x1 = Math.min(m.startX, e.clientX);
+      const y1 = Math.min(m.startY, e.clientY);
+      const x2 = Math.max(m.startX, e.clientX);
+      const y2 = Math.max(m.startY, e.clientY);
+
+      const hits: SelectedKf[] = [];
+      diamonds.forEach((el) => {
+        const rect = el.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        if (cx >= x1 && cx <= x2 && cy >= y1 && cy <= y2) {
+          const sceneId = el.getAttribute('data-kf-scene') || '';
+          const trackKey = el.getAttribute('data-kf-track') as TransformTrackKey;
+          const kfIdx = parseInt(el.getAttribute('data-kf-idx') || '0', 10);
+          if (sceneId && trackKey) {
+            hits.push({ sceneId, trackKey, kfIdx });
+          }
+        }
+      });
+
+      if (e.shiftKey) {
+        onSetSelectedKfs((prev) => {
+          const combined = [...prev];
+          for (const h of hits) {
+            if (!combined.some((k) => k.sceneId === h.sceneId && k.trackKey === h.trackKey && k.kfIdx === h.kfIdx)) {
+              combined.push(h);
+            }
+          }
+          return combined;
+        });
+      } else {
+        onSetSelectedKfs(hits);
+      }
+
+      kfMarqueeRef.current = null;
+      setKfMarqueeActive(false);
+      setKfMarqueeRect(null);
+    };
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [kfMarqueeActive, onSetSelectedKfs]);
 
   // Trim drag — snaps to frame boundaries for precision editing.
   // At higher zoom levels you get finer control; at low zoom the snap
@@ -1410,6 +1885,18 @@ function Timeline({
         data-timeline-scroll
         className="overflow-x-auto overflow-y-auto relative flex-1 min-h-0"
       >
+        {/* Keyframe marquee selection overlay */}
+        {kfMarqueeRect && (
+          <div
+            className="absolute border border-blue-500/50 bg-blue-500/10 rounded-sm pointer-events-none z-50"
+            style={{
+              left: kfMarqueeRect.x,
+              top: kfMarqueeRect.y,
+              width: kfMarqueeRect.w,
+              height: kfMarqueeRect.h,
+            }}
+          />
+        )}
         <div className="relative" style={{ width: trackWidth + TIMELINE_LEFT_PAD * 2, minHeight: trackContentHeight }}>
           {/* Ruler */}
           <div
@@ -1449,8 +1936,8 @@ function Timeline({
               const isDropTarget = isClipDragging && clipDragRender?.currentLane === lane;
 
               return (
+                <React.Fragment key={lane}>
                 <div
-                  key={lane}
                   data-lane={lane}
                   className="relative flex-shrink-0"
                   style={{ height: rowHeight }}
@@ -1480,7 +1967,7 @@ function Timeline({
                         aria-label={scene.label || scene.animationId}
                         data-scene-id={scene.sceneId}
                         onMouseDown={(e) => handleClipMouseDown(e, scene.sceneId, idx, lane, timing)}
-                        onClick={(e) => { e.stopPropagation(); if (!isClipDragging) onSelectScene(scene.sceneId, e.shiftKey); }}
+                        onClick={(e) => { e.stopPropagation(); if (!isClipDragging) { onSelectScene(scene.sceneId, e.shiftKey); onSetSelectedKfs([]); } }}
                         className={`
                           absolute top-0.5 bottom-0.5 rounded cursor-pointer select-none group/clip
                           transition-shadow duration-100
@@ -1513,7 +2000,7 @@ function Timeline({
                         <div className="relative z-10 flex items-center gap-1 px-2 py-0.5 h-full overflow-hidden">
                           <GripVertical className="h-3 w-3 text-white/50 flex-shrink-0 cursor-grab" />
                           {scene.customCode && <Code className="h-3 w-3 text-white/60 flex-shrink-0" />}
-                          {scene.reversed && <Undo2 className="h-3 w-3 text-white/60 flex-shrink-0" title="Reversed" />}
+                          {scene.reversed && <Undo2 className="h-3 w-3 text-white/60 flex-shrink-0" />}
                           <div className="min-w-0 flex-1">
                             <div className="text-[11px] font-medium text-white truncate leading-tight">
                               {scene.label || scene.animationId}
@@ -1531,6 +2018,17 @@ function Timeline({
                               </div>
                             )}
                           </div>
+                          {/* Keyframe expand toggle */}
+                          <button
+                            className="flex-shrink-0 p-0.5 rounded hover:bg-white/20 transition-colors"
+                            title={expandedKeyframeScenes.has(scene.sceneId) ? 'Collapse keyframes' : 'Expand keyframes'}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleKeyframeExpansion(scene.sceneId);
+                            }}
+                          >
+                            <Diamond className={`h-3 w-3 ${hasAnyKeyframes(scene.keyframes) ? 'text-yellow-300' : 'text-white/40'}`} />
+                          </button>
                         </div>
                       </div>
                     );
@@ -1672,6 +2170,193 @@ function Timeline({
                     <div className="absolute inset-0 border-2 border-dashed border-primary/50 rounded pointer-events-none z-0" />
                   )}
                 </div>
+                {/* Keyframe property tracks for expanded scenes in this lane */}
+                {entries.map(({ scene, timing }) => {
+                  if (!expandedKeyframeScenes.has(scene.sceneId)) return null;
+                  const clipLeft = TIMELINE_LEFT_PAD + timing.startMs * pxPerMs;
+                  const clipWidth = Math.max(30, scene.durationMs * pxPerMs);
+                  const sceneColor = sceneColorForId(scene.sceneId);
+                  const baseTransform = scene.transform || DEFAULT_TRANSFORM;
+
+                  return (
+                    <div key={`kf-${scene.sceneId}`} className="relative flex flex-col">
+                      {TRANSFORM_TRACK_KEYS.map((trackKey) => {
+                        const track = scene.keyframes?.[trackKey];
+                        const count = track?.length ?? 0;
+                        const label = TRANSFORM_TRACK_LABELS[trackKey];
+
+                        return (
+                          <React.Fragment key={trackKey}>
+                            {/* Property header row */}
+                            <div className="relative flex-shrink-0" style={{ height: 22 }}>
+                              {/* Header background aligned to clip */}
+                              <div
+                                className={`absolute top-0 bottom-0 bg-muted/10 border-x border-t border-border/20 ${count > 0 ? 'rounded-t-sm' : 'rounded-sm'}`}
+                                style={{ left: clipLeft, width: clipWidth }}
+                              />
+                              {/* Label + chevron */}
+                              <div
+                                className="absolute top-0 h-full flex items-center text-[10px] text-muted-foreground select-none cursor-default"
+                                style={{ left: clipLeft + 6 }}
+                              >
+                                {count > 0 ? (
+                                  <ChevronDown className="h-2.5 w-2.5 mr-1 text-muted-foreground/60" />
+                                ) : (
+                                  <ChevronRight className="h-2.5 w-2.5 mr-1 text-muted-foreground/40" />
+                                )}
+                                <span className={count > 0 ? 'text-muted-foreground' : 'text-muted-foreground/50'}>
+                                  {label}
+                                </span>
+                              </div>
+                              {/* Easing curve icon on the right */}
+                              {count > 0 && (
+                                <div
+                                  className="absolute top-0 h-full flex items-center"
+                                  style={{ left: clipLeft + clipWidth - 22 }}
+                                >
+                                  <svg className="h-3.5 w-3.5 text-muted-foreground/30" viewBox="0 0 16 16" fill="none">
+                                    <path d="M2 14 C6 14 10 2 14 2" stroke="currentColor" strokeWidth="1.5" />
+                                  </svg>
+                                </div>
+                              )}
+                              {/* Click to add first keyframe if none exist */}
+                              {count === 0 && (
+                                <div
+                                  className="absolute top-0 h-full cursor-pointer opacity-0 hover:opacity-100 transition-opacity"
+                                  style={{ left: clipLeft, width: clipWidth }}
+                                  title="Click to add keyframe"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    const clickX = e.clientX - rect.left;
+                                    const normTime = Math.max(0, Math.min(1, clickX / clipWidth));
+                                    const value = getTransformValue(baseTransform, trackKey);
+                                    const newTracks = setKeyframe(scene.keyframes, trackKey, normTime, value);
+                                    onUpdateScene(scene.sceneId, { keyframes: newTracks });
+                                  }}
+                                />
+                              )}
+                            </div>
+
+                            {/* Diamond strip row — only when track has keyframes */}
+                            {count > 0 && (
+                              <div className="relative flex-shrink-0 group/kftrack" style={{ height: 22 }}>
+                                {/* Strip background */}
+                                <div
+                                  className="absolute top-0 bottom-0 rounded-b-sm bg-muted/20 border-x border-b border-border/30"
+                                  style={{ left: clipLeft, width: clipWidth }}
+                                />
+
+                                {/* Dotted line between first and last keyframe */}
+                                {count >= 2 && (() => {
+                                  const firstKf = track![0];
+                                  const lastKf = track![track!.length - 1];
+                                  const lineLeft = clipLeft + firstKf.time * clipWidth;
+                                  const lineWidth = (lastKf.time - firstKf.time) * clipWidth;
+                                  return (
+                                    <div
+                                      className="absolute top-1/2 -translate-y-px h-px pointer-events-none"
+                                      style={{
+                                        left: lineLeft,
+                                        width: lineWidth,
+                                        borderTop: `1px dashed ${sceneColor}`,
+                                        opacity: 0.5,
+                                      }}
+                                    />
+                                  );
+                                })()}
+
+                                {/* Keyframe diamonds */}
+                                {track?.map((kf, kfIdx) => {
+                                  const kfX = clipLeft + kf.time * clipWidth;
+                                  const kfSel = isKfSelected(scene.sceneId, trackKey, kfIdx);
+                                  return (
+                                    <div
+                                      key={kfIdx}
+                                      data-kf-diamond
+                                      data-kf-scene={scene.sceneId}
+                                      data-kf-track={trackKey}
+                                      data-kf-idx={kfIdx}
+                                      className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 cursor-pointer z-10
+                                                   transition-transform ${kfSel ? 'scale-[1.4]' : 'hover:scale-125'}`}
+                                      style={{ left: kfX }}
+                                      title={`${label}: ${kf.value.toFixed(2)} at ${(kf.time * 100).toFixed(0)}%${kf.easing ? ` (${kf.easing})` : ''}`}
+                                      onMouseDown={(e) => {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                        // Select keyframe(s) — Shift adds to selection
+                                        if (e.shiftKey) {
+                                          onSetSelectedKfs((prev) => {
+                                            const already = prev.some(
+                                              (k) => k.sceneId === scene.sceneId && k.trackKey === trackKey && k.kfIdx === kfIdx
+                                            );
+                                            return already
+                                              ? prev.filter(
+                                                  (k) => !(k.sceneId === scene.sceneId && k.trackKey === trackKey && k.kfIdx === kfIdx)
+                                                )
+                                              : [...prev, { sceneId: scene.sceneId, trackKey, kfIdx }];
+                                          });
+                                        } else {
+                                          onSetSelectedKfs([{ sceneId: scene.sceneId, trackKey, kfIdx }]);
+                                        }
+                                        onSelectScene(scene.sceneId);
+                                        // Start drag
+                                        kfDragRef.current = {
+                                          sceneId: scene.sceneId,
+                                          trackKey,
+                                          kfIdx,
+                                          originalTime: kf.time,
+                                          startX: e.clientX,
+                                          clipLeft,
+                                          clipWidth,
+                                        };
+                                        setKfDragActive(true);
+                                      }}
+                                    >
+                                      <Diamond
+                                        className={`h-3 w-3 ${kfSel ? 'text-white fill-white drop-shadow-[0_0_4px_rgba(255,255,255,0.7)]' : ''}`}
+                                        style={kfSel ? {} : { color: sceneColor, fill: sceneColor }}
+                                      />
+                                    </div>
+                                  );
+                                })}
+
+                                {/* Click/drag on strip background — click adds kf, drag starts marquee */}
+                                <div
+                                  className="absolute top-0 h-full cursor-crosshair opacity-0 group-hover/kftrack:opacity-100 transition-opacity"
+                                  style={{ left: clipLeft, width: clipWidth }}
+                                  onMouseDown={(e) => {
+                                    // Check if we clicked directly on a diamond (not background)
+                                    if ((e.target as HTMLElement).closest('[data-kf-diamond]')) return;
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    const scrollEl = e.currentTarget.closest('[data-timeline-scroll]') as HTMLElement;
+                                    if (!scrollEl) return;
+                                    kfMarqueeRef.current = { startX: e.clientX, startY: e.clientY, scrollEl };
+                                    setKfMarqueeActive(true);
+                                  }}
+                                  onClick={(e) => {
+                                    // Only add keyframe on clean click (no marquee drag)
+                                    if (kfMarqueeRect && (kfMarqueeRect.w > 4 || kfMarqueeRect.h > 4)) return;
+                                    e.stopPropagation();
+                                    onSetSelectedKfs([]);
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    const clickX = e.clientX - rect.left;
+                                    const normTime = Math.max(0, Math.min(1, clickX / clipWidth));
+                                    const value = getTransformValue(baseTransform, trackKey);
+                                    const newTracks = setKeyframe(scene.keyframes, trackKey, normTime, value);
+                                    onUpdateScene(scene.sceneId, { keyframes: newTracks });
+                                  }}
+                                />
+                              </div>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+                </React.Fragment>
               );
             })}
           </div>
@@ -1760,6 +2445,8 @@ export function Composer() {
   const [sequence, setSequence] = useState<Sequence>(() => createEmptySequence());
   const [selectedSceneIds, setSelectedSceneIds] = useState<Set<string>>(new Set());
   const [hoveredSceneId, setHoveredSceneId] = useState<string | null>(null);
+  // Selected keyframes (lifted from Timeline so Composer-level Delete handler respects them)
+  const [selectedKfs, setSelectedKfs] = useState<{ sceneId: string; trackKey: TransformTrackKey; kfIdx: number }[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState('');
   const [pickerTab, setPickerTab] = useState<'gallery' | 'code'>('gallery');
@@ -1804,7 +2491,10 @@ export function Composer() {
 
   // Canvas drag-to-move state
   const [isDraggingOnCanvas, setIsDraggingOnCanvas] = useState(false);
-  const canvasDragRef = useRef({ startX: 0, startY: 0, origOffsetX: 0, origOffsetY: 0, sceneId: '' });
+  const canvasDragRef = useRef({
+    startX: 0, startY: 0, origOffsetX: 0, origOffsetY: 0, sceneId: '',
+    localProgress: 0, hasKfX: false, hasKfY: false,
+  });
 
   // Canvas scale drag state (declared early because handleCanvasAreaClick references it)
   const [isScaling, setIsScaling] = useState(false);
@@ -2265,34 +2955,58 @@ export function Composer() {
         return;
       }
 
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedSceneIds.size > 0) {
-        e.preventDefault();
-        setSequence((prev) => ({
-          ...prev,
-          scenes: prev.scenes.filter((s) => !selectedSceneIds.has(s.sceneId)),
-        }));
-        setSelectedSceneIds(new Set());
-      }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedAudioClipId) {
-        e.preventDefault();
-        setSequence((prev) => ({
-          ...prev,
-          audioClips: prev.audioClips.filter((c) => c.clipId !== selectedAudioClipId),
-        }));
-        setSelectedAudioClipId(null);
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        // Priority: selected keyframes > selected scenes > selected audio clips
+        if (selectedKfs.length > 0) {
+          e.preventDefault();
+          // Delete all selected keyframes
+          setSequence((prev) => {
+            let scenes = [...prev.scenes];
+            for (const kf of selectedKfs) {
+              const idx = scenes.findIndex((s) => s.sceneId === kf.sceneId);
+              if (idx < 0) continue;
+              const scene = scenes[idx];
+              const track = scene.keyframes?.[kf.trackKey];
+              if (!track || !track[kf.kfIdx]) continue;
+              const newTracks = removeKeyframe(scene.keyframes, kf.trackKey, track[kf.kfIdx].time);
+              const hasKfs = Object.values(newTracks).some((t) => t && t.length > 0);
+              scenes[idx] = { ...scene, keyframes: hasKfs ? newTracks : undefined };
+            }
+            return { ...prev, scenes };
+          });
+          setSelectedKfs([]);
+        } else if (selectedSceneIds.size > 0) {
+          e.preventDefault();
+          setSequence((prev) => ({
+            ...prev,
+            scenes: prev.scenes.filter((s) => !selectedSceneIds.has(s.sceneId)),
+          }));
+          setSelectedSceneIds(new Set());
+        } else if (selectedAudioClipId) {
+          e.preventDefault();
+          setSequence((prev) => ({
+            ...prev,
+            audioClips: prev.audioClips.filter((c) => c.clipId !== selectedAudioClipId),
+          }));
+          setSelectedAudioClipId(null);
+        }
       }
       if (e.key === ' ') {
         e.preventDefault();
         togglePlay();
       }
       if (e.key === 'Escape') {
-        setSelectedSceneIds(new Set());
-        setSelectedAudioClipId(null);
+        if (selectedKfs.length > 0) {
+          setSelectedKfs([]);
+        } else {
+          setSelectedSceneIds(new Set());
+          setSelectedAudioClipId(null);
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedSceneIds, selectedAudioClipId, togglePlay, undo, redo]);
+  }, [selectedSceneIds, selectedAudioClipId, selectedKfs, togglePlay, undo, redo]);
 
   // ─── Canvas zoom/pan ──────────────────────────────────────────────────────
 
@@ -2394,7 +3108,8 @@ export function Composer() {
             if (!timing || currentTimeMs < timing.startMs || currentTimeMs >= timing.endMs) continue;
             const animation = animationsMap.get(scene.animationId);
             if (!animation) continue;
-            const bbox = computeSceneBBox(scene, animation, sequence.width, sequence.height);
+            const lp = getSceneLocalProgress(currentTimeMs, timing, scene.durationMs);
+            const bbox = computeSceneBBox(scene, animation, sequence.width, sequence.height, lp);
             if (bbox.x + bbox.width >= mx1 && bbox.x <= mx2 && bbox.y + bbox.height >= my1 && bbox.y <= my2) {
               hitIds.push(scene.sceneId);
             }
@@ -2424,7 +3139,8 @@ export function Composer() {
             if (!timing || currentTimeMs < timing.startMs || currentTimeMs >= timing.endMs) continue;
             const animation = animationsMap.get(scene.animationId);
             if (!animation) continue;
-            const bbox = computeSceneBBox(scene, animation, sequence.width, sequence.height);
+            const lp = getSceneLocalProgress(currentTimeMs, timing, scene.durationMs);
+            const bbox = computeSceneBBox(scene, animation, sequence.width, sequence.height, lp);
             if (clickX >= bbox.x && clickX <= bbox.x + bbox.width && clickY >= bbox.y && clickY <= bbox.y + bbox.height) {
               if (shiftKey) {
                 setSelectedSceneIds(prev => {
@@ -2483,7 +3199,8 @@ export function Composer() {
       const animation = animationsMap.get(scene.animationId);
       if (!animation) continue;
 
-      const bbox = computeSceneBBox(scene, animation, sequence.width, sequence.height);
+      const lp = getSceneLocalProgress(currentTimeMs, timing, scene.durationMs);
+      const bbox = computeSceneBBox(scene, animation, sequence.width, sequence.height, lp);
       if (
         hoverX >= bbox.x && hoverX <= bbox.x + bbox.width &&
         hoverY >= bbox.y && hoverY <= bbox.y + bbox.height
@@ -2504,16 +3221,29 @@ export function Composer() {
     e.preventDefault();
     const scene = sequence.scenes.find((s) => s.sceneId === sceneId);
     if (!scene) return;
-    const transform = scene.transform || DEFAULT_TRANSFORM;
+    const baseTransform = scene.transform || DEFAULT_TRANSFORM;
+    // Use the animated (keyframed) values as the starting offsets so the drag
+    // feels continuous even when keyframes are driving the position.
+    const sceneIdx = sequence.scenes.findIndex((s) => s.sceneId === sceneId);
+    const sceneTimingsArr = getSceneTimings(sequence.scenes);
+    const lp = sceneIdx >= 0 && sceneTimingsArr[sceneIdx]
+      ? getSceneLocalProgress(currentTimeMs, sceneTimingsArr[sceneIdx], scene.durationMs)
+      : 0;
+    const animatedT = evaluateTransformKeyframes(scene.keyframes, lp, baseTransform);
+    const hasKfX = getTrackKeyframeCount(scene.keyframes, 'transform.offsetX') > 0;
+    const hasKfY = getTrackKeyframeCount(scene.keyframes, 'transform.offsetY') > 0;
     setIsDraggingOnCanvas(true);
     canvasDragRef.current = {
       startX: e.clientX,
       startY: e.clientY,
-      origOffsetX: transform.offsetX,
-      origOffsetY: transform.offsetY,
+      origOffsetX: animatedT.offsetX,
+      origOffsetY: animatedT.offsetY,
       sceneId,
+      localProgress: lp,
+      hasKfX,
+      hasKfY,
     };
-  }, [sequence.scenes]);
+  }, [sequence.scenes, currentTimeMs]);
 
   useEffect(() => {
     if (!isDraggingOnCanvas) return;
@@ -2521,20 +3251,39 @@ export function Composer() {
       const ref = canvasDragRef.current;
       if (!canvasRef.current) return;
       const canvasRect = canvasRef.current.getBoundingClientRect();
-      // canvasRect already includes CSS zoom, so just convert screen→sequence space
       const scaleX = sequence.width / canvasRect.width;
       const scaleY = sequence.height / canvasRect.height;
       const dx = (e.clientX - ref.startX) * scaleX;
       const dy = (e.clientY - ref.startY) * scaleY;
       const newOffsetX = Math.round(ref.origOffsetX + dx);
       const newOffsetY = Math.round(ref.origOffsetY + dy);
+
       setSequence((prev) => ({
         ...prev,
-        scenes: prev.scenes.map((s) =>
-          s.sceneId === ref.sceneId
-            ? { ...s, transform: { ...(s.transform || DEFAULT_TRANSFORM), offsetX: newOffsetX, offsetY: newOffsetY } }
-            : s
-        ),
+        scenes: prev.scenes.map((s) => {
+          if (s.sceneId !== ref.sceneId) return s;
+          const base = s.transform || DEFAULT_TRANSFORM;
+          let updatedTransform = base;
+          let updatedKfs = s.keyframes;
+
+          // If the property is keyframed, add/update a keyframe at the playhead
+          if (ref.hasKfX) {
+            updatedKfs = setKeyframe(updatedKfs, 'transform.offsetX', ref.localProgress!, newOffsetX);
+          } else {
+            updatedTransform = { ...updatedTransform, offsetX: newOffsetX };
+          }
+          if (ref.hasKfY) {
+            updatedKfs = setKeyframe(updatedKfs, 'transform.offsetY', ref.localProgress!, newOffsetY);
+          } else {
+            updatedTransform = { ...updatedTransform, offsetY: newOffsetY };
+          }
+
+          return {
+            ...s,
+            transform: updatedTransform !== base ? updatedTransform : s.transform,
+            keyframes: updatedKfs !== s.keyframes ? updatedKfs : s.keyframes,
+          };
+        }),
       }));
     };
     const handleUp = () => { setIsDraggingOnCanvas(false); lastInteractionEndRef.current = Date.now(); };
@@ -2563,6 +3312,7 @@ export function Composer() {
     anchorSignX: 0, anchorSignY: 0,
     halfBaseW: 0, halfBaseH: 0,
     sceneId: '',
+    localProgress: 0, hasKfScale: false, hasKfX: false, hasKfY: false,
   });
 
   /** Start scaling from a corner handle; cornerIdx identifies which corner. */
@@ -2571,43 +3321,51 @@ export function Composer() {
     e.preventDefault();
     const scene = sequence.scenes.find((s) => s.sceneId === sceneId);
     if (!scene || !canvasRef.current) return;
-    const transform = scene.transform || DEFAULT_TRANSFORM;
+    const baseTransform = scene.transform || DEFAULT_TRANSFORM;
     const animation = animationsMap.get(scene.animationId);
     if (!animation) return;
 
     const canvasRect = canvasRef.current.getBoundingClientRect();
-    const bbox = computeSceneBBox(scene, animation, sequence.width, sequence.height);
+    const sceneIdx = sequence.scenes.findIndex((s) => s.sceneId === sceneId);
+    const sceneTimingsArr = getSceneTimings(sequence.scenes);
+    const lp = sceneIdx >= 0 && sceneTimingsArr[sceneIdx]
+      ? getSceneLocalProgress(currentTimeMs, sceneTimingsArr[sceneIdx], scene.durationMs)
+      : 0;
+    const animatedT = evaluateTransformKeyframes(scene.keyframes, lp, baseTransform);
+    const bbox = computeSceneBBox(scene, animation, sequence.width, sequence.height, lp);
 
     const [anchorSignX, anchorSignY] = CORNER_ANCHOR_SIGNS[cornerIdx];
 
-    // Anchor corner in sequence space
     const anchorSeqX = bbox.x + bbox.width / 2 + anchorSignX * bbox.width / 2;
     const anchorSeqY = bbox.y + bbox.height / 2 + anchorSignY * bbox.height / 2;
 
-    // Convert to screen coordinates
     const anchorScreenX = canvasRect.left + (anchorSeqX / sequence.width) * canvasRect.width;
     const anchorScreenY = canvasRect.top + (anchorSeqY / sequence.height) * canvasRect.height;
 
     const startDist = Math.max(10, Math.hypot(e.clientX - anchorScreenX, e.clientY - anchorScreenY));
 
-    // Pre-compute base half-sizes (at scale=1) for offset adjustment
     const animW = animation.width ?? 800;
     const animH = animation.height ?? 600;
     const fitScale = Math.min(sequence.width / animW, sequence.height / animH);
     const halfBaseW = animW * fitScale / 2;
     const halfBaseH = animH * fitScale / 2;
 
+    const hasKfScale = getTrackKeyframeCount(scene.keyframes, 'transform.scale') > 0;
+    const hasKfX = getTrackKeyframeCount(scene.keyframes, 'transform.offsetX') > 0;
+    const hasKfY = getTrackKeyframeCount(scene.keyframes, 'transform.offsetY') > 0;
+
     setIsScaling(true);
     scaleDragRef.current = {
       anchorScreenX, anchorScreenY, startDist,
-      origScale: transform.scale,
-      origOffsetX: transform.offsetX,
-      origOffsetY: transform.offsetY,
+      origScale: animatedT.scale,
+      origOffsetX: animatedT.offsetX,
+      origOffsetY: animatedT.offsetY,
       anchorSignX, anchorSignY,
       halfBaseW, halfBaseH,
       sceneId,
+      localProgress: lp, hasKfScale, hasKfX, hasKfY,
     };
-  }, [sequence.scenes, animationsMap, sequence.width, sequence.height]);
+  }, [sequence.scenes, animationsMap, sequence.width, sequence.height, currentTimeMs]);
 
   useEffect(() => {
     if (!isScaling) return;
@@ -2617,17 +3375,39 @@ export function Composer() {
       const ratio = currentDist / ref.startDist;
       const newScale = Math.max(0.1, Math.min(5, Math.round(ref.origScale * ratio * 100) / 100));
 
-      // Adjust offset so anchor corner stays fixed
       const newOffsetX = Math.round(ref.origOffsetX + ref.anchorSignX * ref.halfBaseW * (ref.origScale - newScale));
       const newOffsetY = Math.round(ref.origOffsetY + ref.anchorSignY * ref.halfBaseH * (ref.origScale - newScale));
 
       setSequence((prev) => ({
         ...prev,
-        scenes: prev.scenes.map((s) =>
-          s.sceneId === ref.sceneId
-            ? { ...s, transform: { ...(s.transform || DEFAULT_TRANSFORM), scale: newScale, offsetX: newOffsetX, offsetY: newOffsetY } }
-            : s
-        ),
+        scenes: prev.scenes.map((s) => {
+          if (s.sceneId !== ref.sceneId) return s;
+          const base = s.transform || DEFAULT_TRANSFORM;
+          let updatedTransform = base;
+          let updatedKfs = s.keyframes;
+
+          if (ref.hasKfScale) {
+            updatedKfs = setKeyframe(updatedKfs, 'transform.scale', ref.localProgress, newScale);
+          } else {
+            updatedTransform = { ...updatedTransform, scale: newScale };
+          }
+          if (ref.hasKfX) {
+            updatedKfs = setKeyframe(updatedKfs, 'transform.offsetX', ref.localProgress, newOffsetX);
+          } else {
+            updatedTransform = { ...updatedTransform, offsetX: newOffsetX };
+          }
+          if (ref.hasKfY) {
+            updatedKfs = setKeyframe(updatedKfs, 'transform.offsetY', ref.localProgress, newOffsetY);
+          } else {
+            updatedTransform = { ...updatedTransform, offsetY: newOffsetY };
+          }
+
+          return {
+            ...s,
+            transform: updatedTransform !== base ? updatedTransform : s.transform,
+            keyframes: updatedKfs !== s.keyframes ? updatedKfs : s.keyframes,
+          };
+        }),
       }));
     };
     const handleUp = () => { setIsScaling(false); lastInteractionEndRef.current = Date.now(); };
@@ -2742,6 +3522,7 @@ export function Composer() {
           lane: s.lane ?? 0,
           connectedTo: s.connectedTo,
           connectedOffsetMs: s.connectedOffsetMs,
+          keyframes: s.keyframes,
         };
       });
 
@@ -2838,6 +3619,35 @@ export function Composer() {
         });
       }
     },
+
+    setKeyframe: (sceneIndex: number, track: TransformTrackKey, time: number, value: number, easing?: EasingType) => {
+      const scene = sequence.scenes[sceneIndex];
+      if (!scene) return;
+      const newTracks = setKeyframe(scene.keyframes, track, time, value, easing);
+      updateScene(scene.sceneId, { keyframes: newTracks });
+    },
+
+    removeKeyframe: (sceneIndex: number, track: TransformTrackKey, time: number) => {
+      const scene = sequence.scenes[sceneIndex];
+      if (!scene) return;
+      const newTracks = removeKeyframe(scene.keyframes, track, time);
+      updateScene(scene.sceneId, {
+        keyframes: Object.keys(newTracks).length > 0 ? newTracks : undefined,
+      });
+    },
+
+    clearKeyframes: (sceneIndex: number, track?: TransformTrackKey) => {
+      const scene = sequence.scenes[sceneIndex];
+      if (!scene) return;
+      if (track) {
+        const newTracks = clearTrack(scene.keyframes, track);
+        updateScene(scene.sceneId, {
+          keyframes: Object.keys(newTracks).length > 0 ? newTracks : undefined,
+        });
+      } else {
+        updateScene(scene.sceneId, { keyframes: undefined });
+      }
+    },
   } satisfies ComposerActions;
 
   // Register/unregister on mount/unmount
@@ -2903,15 +3713,20 @@ export function Composer() {
     [sequence.scenes, selectedSceneIds]
   );
 
-  // Bounding boxes for ALL selected scenes
+  // Bounding boxes for ALL selected scenes (uses keyframed transform at current time)
   const selectedBoundingBoxes = useMemo(() => {
     if (selectedSceneIds.size === 0) return [];
+    const timingsArr = getSceneTimings(sequence.scenes);
     return Array.from(selectedSceneIds).map(id => {
-      const scene = sequence.scenes.find(s => s.sceneId === id);
+      const idx = sequence.scenes.findIndex(s => s.sceneId === id);
+      const scene = sequence.scenes[idx];
       if (!scene) return null;
       const animation = animationsMap.get(scene.animationId);
       if (!animation) return null;
-      const bbox = computeSceneBBox(scene, animation, sequence.width, sequence.height);
+      const lp = timingsArr[idx]
+        ? getSceneLocalProgress(currentTimeMs, timingsArr[idx], scene.durationMs)
+        : undefined;
+      const bbox = computeSceneBBox(scene, animation, sequence.width, sequence.height, lp);
       return {
         sceneId: id,
         label: scene.label || scene.animationId,
@@ -2921,7 +3736,7 @@ export function Composer() {
         height: (bbox.height / sequence.height) * 100,
       };
     }).filter(Boolean) as { sceneId: string; label: string; x: number; y: number; width: number; height: number }[];
-  }, [selectedSceneIds, sequence.scenes, animationsMap, sequence.width, sequence.height]);
+  }, [selectedSceneIds, sequence.scenes, animationsMap, sequence.width, sequence.height, currentTimeMs]);
 
   // Hover bounding box — shown for any scene under the cursor that isn't selected
   const hoveredScene = hoveredSceneId && !selectedSceneIds.has(hoveredSceneId)
@@ -2931,14 +3746,19 @@ export function Composer() {
     if (!hoveredScene) return null;
     const animation = animationsMap.get(hoveredScene.animationId);
     if (!animation) return null;
-    const bbox = computeSceneBBox(hoveredScene, animation, sequence.width, sequence.height);
+    const idx = sequence.scenes.findIndex(s => s.sceneId === hoveredScene.sceneId);
+    const timingsArr = getSceneTimings(sequence.scenes);
+    const lp = idx >= 0 && timingsArr[idx]
+      ? getSceneLocalProgress(currentTimeMs, timingsArr[idx], hoveredScene.durationMs)
+      : undefined;
+    const bbox = computeSceneBBox(hoveredScene, animation, sequence.width, sequence.height, lp);
     return {
       x: (bbox.x / sequence.width) * 100,
       y: (bbox.y / sequence.height) * 100,
       width: (bbox.width / sequence.width) * 100,
       height: (bbox.height / sequence.height) * 100,
     };
-  }, [hoveredScene, animationsMap, sequence.width, sequence.height]);
+  }, [hoveredScene, animationsMap, sequence.width, sequence.height, currentTimeMs, sequence.scenes]);
 
   const selectedAudioClip = useMemo(
     () => sequence.audioClips?.find((c) => c.clipId === selectedAudioClipId) ?? null,
@@ -2946,6 +3766,13 @@ export function Composer() {
   );
 
   const timings = useMemo(() => getSceneTimings(sequence.scenes), [sequence.scenes]);
+
+  // Timing for the selected scene (for keyframe placement in sidebar)
+  const selectedSceneTiming = useMemo(() => {
+    if (!selectedScene) return undefined;
+    const idx = sequence.scenes.findIndex((s) => s.sceneId === selectedScene.sceneId);
+    return idx >= 0 ? timings[idx] : undefined;
+  }, [selectedScene, sequence.scenes, timings]);
 
   const filteredAnimations = useMemo(() => {
     if (!pickerSearch.trim()) return animations;
@@ -3326,6 +4153,10 @@ export function Composer() {
               onUpdate={(updates) => updateScene(selectedScene.sceneId, updates)}
               onDuplicate={() => duplicateScene(selectedScene.sceneId)}
               onRemove={() => removeScene(selectedScene.sceneId)}
+              currentTimeMs={currentTimeMs}
+              sceneTiming={selectedSceneTiming}
+              selectedKfs={selectedKfs}
+              onSetSelectedKfs={setSelectedKfs}
             />
           ) : (
             <SequenceSettingsSidebar
@@ -3358,6 +4189,8 @@ export function Composer() {
           playing={playing}
           pingPong={pingPong}
           selectedSceneIds={selectedSceneIds}
+          selectedKfs={selectedKfs}
+          onSetSelectedKfs={setSelectedKfs}
           onSelectScene={handleTimelineSelectScene}
           onMarqueeSelect={handleTimelineMarqueeSelect}
           onSeek={handleSeek}

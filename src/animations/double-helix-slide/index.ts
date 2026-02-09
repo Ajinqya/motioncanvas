@@ -77,7 +77,6 @@ const animation: AnimationDefinition<DoubleHelixSlideParams> = {
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
     const { width: textWidth } = ctx.measureText(text);
-    const textHeight = fontSize * 1.1; // approx; canvas doesn't have ascent+descent reliably
     ctx.restore();
 
     // Start at left edge, centered vertically; end at center (canvas center minus half text width)
