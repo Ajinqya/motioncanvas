@@ -194,9 +194,6 @@ const animation: AnimationDefinition<TypeRevealParams> = {
       maskCanvas.width = textWidth + maskSoftness * 2;
       maskCanvas.height = textHeight + maskSoftness * 2;
 
-      const offsetX = maskSoftness;
-      const offsetY = maskSoftness + fontSize / 2;
-
       // Draw text on mask canvas
       maskCtx.font = ctx.font;
       maskCtx.textAlign = 'center';

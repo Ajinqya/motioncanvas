@@ -50,6 +50,7 @@ const animation: AnimationDefinition<TextHighlightSweepParams> = {
     defaults: {
       scale: 0.5,
       content: 'Highlight',
+      fontFamily: 'Inter, system-ui, sans-serif',
       fontSize: 160,
       fontWeight: '400',
       letterSpacing: 0.5,
@@ -153,7 +154,6 @@ const animation: AnimationDefinition<TextHighlightSweepParams> = {
     }
     const metrics = ctx.measureText(content);
     const textWidth = metrics.width;
-    const textHeight = fontSize;
 
     // Create offscreen canvas for text compositing
     const textCanvas = document.createElement('canvas');

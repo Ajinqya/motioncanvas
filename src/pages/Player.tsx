@@ -68,7 +68,7 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
   const [showExport, setShowExport] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [audioLoaded, setAudioLoaded] = useState(false);
+  const [, setAudioLoaded] = useState(false);
   const [audioFileName, setAudioFileName] = useState<string | null>(null);
   const [audioSource, setAudioSource] = useState<'none' | 'file' | 'microphone'>('none');
   const [micError, setMicError] = useState<string | null>(null);

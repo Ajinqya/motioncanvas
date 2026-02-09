@@ -98,23 +98,17 @@ const animation: AnimationDefinition<BallPortalParams> = {
     // 0.5→1: ball moves from below back up through to above
     // Use sine easing for smooth deceleration at extremes
     let ballY: number;
-    let ballVelocity: number; // positive = moving down, negative = moving up
 
     if (p < 0.5) {
       // Moving downward: top → bottom
       const t = p / 0.5;
       const eased = easeInOutSine(t);
       ballY = portalCenterY - travelDistance + eased * 2 * travelDistance;
-      // Velocity is the derivative of position (positive = downward)
-      ballVelocity = Math.cos(Math.PI * t) > 0 ? 1 : -1;
-      // More precise: velocity proportional to cos
-      ballVelocity = Math.PI * Math.sin(Math.PI * t) / 2; // always positive in 0..0.5
     } else {
       // Moving upward: bottom → top
       const t = (p - 0.5) / 0.5;
       const eased = easeInOutSine(t);
       ballY = portalCenterY + travelDistance - eased * 2 * travelDistance;
-      ballVelocity = -(Math.PI * Math.sin(Math.PI * t) / 2); // always negative in 0.5..1
     }
 
     // ----- Determine ball phase (above or below portal) -----

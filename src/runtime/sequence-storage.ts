@@ -56,7 +56,6 @@ export function saveSequence(seq: Sequence): void {
 /** Update the meta index for a sequence */
 function updateMeta(seq: Sequence): void {
   const list = listSavedSequences();
-  const existing = list.find((m) => m.id === seq.id);
   const meta: SavedSequenceMeta = {
     id: seq.id,
     name: seq.name,

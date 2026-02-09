@@ -30,7 +30,6 @@ interface CandleFlameParams {
 }
 
 // Easing helpers
-const easeInOutSine = (t: number): number => -(Math.cos(Math.PI * t) - 1) / 2;
 const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
 
 // Simple seeded pseudo-random for grain
@@ -291,8 +290,6 @@ const animation: AnimationDefinition<CandleFlameParams> = {
     // Flame dimensions
     const flameHeight = 170 * flickerScale;
     const flameWidth = 52 + flicker2 * flickerAmount * 8;
-    const flameTipY = flameBaseY - flameHeight;
-
     // Draw flame using layered bezier curves
 
     // --- Layer 1: Blue outer flame (widest, most transparent) ---

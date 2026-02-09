@@ -172,8 +172,6 @@ const animation: AnimationDefinition<RibbonFlowParams> = {
       const segments = 200;
       const xStart = -width * 0.15;
       const xEnd = width * 1.15;
-      const segWidth = (xEnd - xStart) / segments;
-
       // Time-based animation for this ribbon
       const ribbonTime = t * ribbon.speedMult;
       const drift = flowDirection * ribbonTime * 80;

@@ -48,9 +48,6 @@ const fontMap: Record<string, string> = {
 
 // --- Easing helpers ---
 
-/** Cubic ease-out */
-const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
-
 /** Quintic ease-out for smooth text entrance */
 const easeOutQuint = (t: number): number => 1 - Math.pow(1 - t, 5);
 

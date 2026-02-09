@@ -1,5 +1,5 @@
 import type { AnimationDefinition } from '../../runtime/types';
-import { number, color, boolean, folder, select } from '../../runtime/params';
+import { number, color, boolean, folder } from '../../runtime/params';
 
 interface ConfettiBurstParams {
   // Layout
@@ -30,7 +30,6 @@ function seededRandom(seed: number): () => number {
 }
 
 // Easing
-const easeOutQuart = (t: number): number => 1 - Math.pow(1 - t, 4);
 const easeInCubic = (t: number): number => t * t * t;
 const easeOutExpo = (t: number): number => t === 1 ? 1 : 1 - Math.pow(2, -10 * t);
 

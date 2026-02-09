@@ -31,9 +31,6 @@ interface AudioKnobsParams {
 const easeInOutCubic = (t: number): number =>
   t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
-const easeInOutSine = (t: number): number =>
-  -(Math.cos(Math.PI * t) - 1) / 2;
-
 // ── Knob drawing helper ───────────────────────────────────────────────────────
 function drawKnob(
   ctx: CanvasRenderingContext2D,
@@ -460,7 +457,6 @@ const animation: AnimationDefinition<AudioKnobsParams> = {
       const endAngle = (7 / 4) * Math.PI;     // 315° (5 o'clock)
       const range = endAngle - startAngle;
       // Smooth back-and-forth using sine wave
-      const t = easeInOutSine(p);
       // First half goes up, second half goes back
       const sweep = p < 0.5
         ? easeInOutCubic(p * 2)

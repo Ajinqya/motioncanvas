@@ -38,7 +38,6 @@ import {
   ArrowLeft,
   Play,
   Pause,
-  RotateCcw,
   Plus,
   Trash2,
   GripVertical,
@@ -1715,7 +1714,7 @@ export function Composer() {
   const redoStackRef = useRef<Sequence[]>([]);
   const prevSeqForUndoRef = useRef<Sequence>(sequence);
   const isUndoingRef = useRef(false);
-  const undoCommitTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const undoCommitTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     // Skip recording changes triggered by undo/redo itself
@@ -2566,10 +2565,6 @@ export function Composer() {
     }));
   };
 
-  const reorderScenes = useCallback((newScenes: SceneEntry[]) => {
-    setSequence((prev) => ({ ...prev, scenes: newScenes }));
-  }, []);
-
   const handleDropOnLane = useCallback((
     sceneId: string,
     targetLane: number,
@@ -2775,7 +2770,7 @@ export function Composer() {
           onMouseDown={handleCanvasAreaMouseDown}
           onMouseMove={(e) => { handlePanMove(e); handleCanvasMouseMove(e); }}
           onMouseUp={handlePanEnd}
-          onMouseLeave={(e) => { handlePanEnd(); handleCanvasMouseLeave(); }}
+          onMouseLeave={() => { handlePanEnd(); handleCanvasMouseLeave(); }}
           style={{ cursor: isPanning ? 'grabbing' : isDraggingOnCanvas ? 'move' : isCanvasMarqueeing ? 'crosshair' : hoveredSceneId ? 'pointer' : undefined }}
         >
           {sequence.scenes.length === 0 ? (

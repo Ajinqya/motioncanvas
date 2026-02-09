@@ -1,13 +1,11 @@
 import type { AnimationDefinition } from '../../runtime/types';
-import { number, color, boolean, folder, select } from '../../runtime/params';
+import { number, color, boolean, folder } from '../../runtime/params';
 
 /* ------------------------------------------------------------------ */
 /*  Easing helpers                                                     */
 /* ------------------------------------------------------------------ */
 const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
 const easeOutQuart = (t: number) => 1 - Math.pow(1 - t, 4);
-const easeInOutCubic = (t: number) =>
-  t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 const easeOutBack = (t: number) => {
   const c1 = 1.70158;
   const c3 = c1 + 1;
@@ -243,7 +241,6 @@ const animation: AnimationDefinition<WorldMapParams> = {
       scale,
       dotSize,
       landColor,
-      oceanColor,
       backgroundColor,
       cityGlowColor,
       labelColor,
