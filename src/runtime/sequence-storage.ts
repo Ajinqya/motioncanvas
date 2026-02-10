@@ -40,6 +40,8 @@ export interface SavedSequenceMeta {
   durationMs: number;
   width: number;
   height: number;
+  isPublic?: boolean;
+  creatorEmail?: string;
 }
 
 function storageKey(id: string): string {

@@ -23,49 +23,33 @@ export function AnimationThumbnail({ animation, className, isPlaying = true }: A
 
     // Small delay to ensure DOM is ready
     const timeoutId = setTimeout(() => {
-      // Get the actual container dimensions
-      const containerRect = container.getBoundingClientRect();
-      let containerWidth = containerRect.width;
-      let containerHeight = containerRect.height;
-      
-      // Fallback if dimensions are not yet available
-      if (containerWidth === 0 || containerHeight === 0) {
-        containerWidth = 400;
-        containerHeight = 300;
-      }
-
       try {
-        // Use container dimensions directly - parent already has correct aspect ratio
-        const displayWidth = Math.round(containerWidth);
-        const displayHeight = Math.round(containerHeight);
-
-        // Create scaled animation definition to fill container
-        const scaledAnimation: AnyAnimationDefinition = {
-          ...animation,
-          width: displayWidth,
-          height: displayHeight,
-        };
-
-        // Add default params if they exist
+        // Use animation's native resolution - like the Player page.
+        // Canvas will scale to fit via object-contain, avoiding zoom/crop.
         const params = 'params' in animation && animation.params && 'defaults' in animation.params
           ? animation.params.defaults
           : undefined;
 
-        // Create player
+        // Create player with original animation dimensions
         const player = createPlayer({
           canvas,
-          animation: scaledAnimation,
+          animation,
           params,
         });
 
         playerRef.current = player;
-        
-        // Override the inline styles set by createPlayer to fill container
+
+        // Scale to fit (contain) within container - matches Player page behavior
         canvas.style.width = '100%';
         canvas.style.height = '100%';
+        canvas.style.objectFit = 'contain';
+        canvas.style.objectPosition = 'center';
+
+        // Seek to 50% progress for thumbnail preview (avoids blank intro frames)
+        const durationMs = animation.durationMs ?? 3000;
+        player.seek((durationMs / 1000) * 0.5);
         
-        // Player starts paused (first frame rendered by createPlayer)
-        // Only play if isPlaying is true
+        // Only play if isPlaying is true (otherwise stays at 50% frame)
         if (isPlaying) {
           player.play();
         }
@@ -105,7 +89,7 @@ export function AnimationThumbnail({ animation, className, isPlaying = true }: A
     >
       <canvas 
         ref={canvasRef} 
-        style={{ width: '100%', height: '100%', display: 'block' }}
+        style={{ width: '100%', height: '100%', display: 'block', objectFit: 'contain', objectPosition: 'center' }}
       />
     </div>
   );

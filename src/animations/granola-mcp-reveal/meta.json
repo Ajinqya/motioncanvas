@@ -1,0 +1,19 @@
+{
+  "id": "granola-mcp-reveal",
+  "name": "Granola MCP Reveal",
+  "createdAt": "2026-02-10T00:00:00.000Z",
+  "updatedAt": "2026-02-10T07:37:12.412Z",
+  "source": {
+    "type": "screenshot",
+    "notes": "Based on reference images showing granola logo with tagline transition"
+  },
+  "prompt": "Create animation with 16:9 aspect ratio showing: 1) BG fades in and entire block slides up from bottom, 2) Granola logo moves to left, 3) 'now with MCP' appears word by word with slide up animation. Image 1: 'granola the notes.' centered. Image 2: 'granola now with MCP' with logo moved left.",
+  "tags": [
+    "logo",
+    "reveal",
+    "text",
+    "slide",
+    "brand",
+    "transition"
+  ]
+}

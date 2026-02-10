@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -56,6 +57,8 @@ const API_KEY_STORAGE_KEY = 'openai-api-key';
 export function AnimationChat() {
   const navigate = useNavigate();
   const location = useLocation();
+  const auth = useAuth();
+  const isAnonymous = auth.isConfigured && !auth.user;
 
   // Composer integration
   const { actionsRef, isComposerActive } = useComposerChat();
@@ -121,14 +124,14 @@ export function AnimationChat() {
   }, [isOpen, routeAnimationId, animations.length, isOnComposePage, isComposerActive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Effects ──────────────────────────────────────────────
-  // Cmd+K / Ctrl+K to toggle chat
+  // Cmd+K / Ctrl+K to toggle chat (only when signed in)
   useEffect(() => {
+    if (isAnonymous) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         setIsOpen((prev) => {
           if (!prev) {
-            // Opening — focus input after panel appears
             setTimeout(() => inputRef.current?.focus(), 150);
           }
           return !prev;
@@ -137,7 +140,7 @@ export function AnimationChat() {
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [isAnonymous]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -466,6 +469,9 @@ export function AnimationChat() {
     'Add a fade transition between all scenes',
     'Which scene is the longest?',
   ];
+
+  // Don't show AI (cmd+k) for anonymous users
+  if (isAnonymous) return null;
 
   // ── Render ───────────────────────────────────────────────
   return (

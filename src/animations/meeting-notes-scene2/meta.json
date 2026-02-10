@@ -1,0 +1,19 @@
+{
+  "id": "meeting-notes-scene2",
+  "name": "Meeting Notes Scene 2",
+  "createdAt": "2026-02-10T00:00:00.000Z",
+  "updatedAt": "2026-02-10T08:00:49.251Z",
+  "source": {
+    "type": "design",
+    "notes": "Granola meeting notes motion design - logo hub with connecting lines, attraction animation"
+  },
+  "prompt": "Logo hub scene: Granola center with satellite app logos (OpenAI, GitHub, Cursor, Claude, Figma, Windsurf), connecting dotted lines, scale-in reveal, attraction animation to center. Full timing control.",
+  "tags": [
+    "logo",
+    "hub",
+    "granola",
+    "meeting-notes",
+    "reveal",
+    "attraction"
+  ]
+}

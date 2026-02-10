@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useAnimationRegistry } from '../animations/registry';
 import { useDeletedAnimations } from '../hooks/useDeletedAnimations';
 import {
@@ -9,6 +9,10 @@ import {
   generateAudioClipId,
   getSceneTimings,
   getSequenceDurationMs,
+  findFreeLaneForAudio,
+  findFreeLaneForOverlay,
+  findFreeLaneForSceneDrop,
+  findFreeLaneForAudioDrop,
   DEFAULT_TRANSFORM,
   TRANSFORM_TRACK_KEYS,
   TRANSFORM_TRACK_LABELS,
@@ -81,6 +85,10 @@ import {
   Diamond,
   ChevronRight,
   ChevronDown,
+  LogIn,
+  LogOut,
+  User,
+  Globe,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -88,6 +96,9 @@ import {
   listSavedSequences,
   loadSequence,
 } from '../runtime/sequence-storage';
+import { useWorkspace } from '../context/WorkspaceContext';
+import { useAuth } from '../context/AuthContext';
+import { AuthDialog } from '../components/AuthDialog';
 import { exportToMp4 } from '../runtime/exporter';
 import {
   DropdownMenu,
@@ -791,10 +802,12 @@ function AudioClipSettingsSidebar({
   clip,
   onUpdate,
   onRemove,
+  onDuplicate,
 }: {
   clip: AudioClipEntry;
   onUpdate: (updates: Partial<AudioClipEntry>) => void;
   onRemove: () => void;
+  onDuplicate: () => void;
 }) {
   const effectiveDuration = clip.trimEndMs - clip.trimStartMs;
   // Use fullDurationMs if available; fall back to trimEndMs; guarantee at least 1000ms for usability
@@ -841,6 +854,40 @@ function AudioClipSettingsSidebar({
           onValueChange={([v]) => onUpdate({ volume: v })}
           className="mt-1"
         />
+      </div>
+
+      {/* Fade In / Fade Out */}
+      <div>
+        <Label className="text-xs font-semibold">Fade</Label>
+        <p className="text-[10px] text-muted-foreground mt-0.5 mb-2">
+          Smooth volume ramp at the start and end of the clip.
+        </p>
+        <div className="space-y-3">
+          <div>
+            <div className="flex justify-between">
+              <Label className="text-xs text-muted-foreground">Fade In</Label>
+              <span className="text-xs text-muted-foreground tabular-nums">{formatTime(clip.fadeInMs ?? 0)}</span>
+            </div>
+            <Slider
+              min={0} max={effectiveDuration} step={50}
+              value={[Math.min(clip.fadeInMs ?? 0, effectiveDuration)]}
+              onValueChange={([v]) => onUpdate({ fadeInMs: v })}
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <div className="flex justify-between">
+              <Label className="text-xs text-muted-foreground">Fade Out</Label>
+              <span className="text-xs text-muted-foreground tabular-nums">{formatTime(clip.fadeOutMs ?? 0)}</span>
+            </div>
+            <Slider
+              min={0} max={effectiveDuration} step={50}
+              value={[Math.min(clip.fadeOutMs ?? 0, effectiveDuration)]}
+              onValueChange={([v]) => onUpdate({ fadeOutMs: v })}
+              className="mt-1"
+            />
+          </div>
+        </div>
       </div>
 
       <Separator />
@@ -902,7 +949,10 @@ function AudioClipSettingsSidebar({
       <Separator />
 
       {/* Actions */}
-      <div>
+      <div className="space-y-2">
+        <Button variant="outline" size="sm" className="w-full" onClick={onDuplicate}>
+          <Copy className="h-3.5 w-3.5" /> Duplicate Audio
+        </Button>
         <Button variant="destructive" size="sm" className="w-full" onClick={onRemove}>
           <Trash2 className="h-3.5 w-3.5" /> Remove Audio Clip
         </Button>
@@ -993,13 +1043,15 @@ function Timeline({
   audioWaveforms: Map<string, number[]>;
 }) {
   const timelineRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [containerHeight, setContainerHeight] = useState(0);
   const sequenceRef = useRef(sequence);
   const selectedKfsRef = useRef(selectedKfs);
   selectedKfsRef.current = selectedKfs;
   const onDropOnLaneRef = useRef(onDropOnLane);
   const xToMsRef = useRef<(clientX: number, containerEl: HTMLElement) => number>(() => 0);
   const [trimming, setTrimming] = useState<{
-    sceneId: string; edge: 'left' | 'right'; startX: number; startDuration: number;
+    sceneId: string; edge: 'left' | 'right'; startX: number; startDuration: number; startTrimStartMs: number;
   } | null>(null);
   const [audioTrimming, setAudioTrimming] = useState<{
     clipId: string; edge: 'left' | 'right'; startX: number;
@@ -1085,21 +1137,12 @@ function Timeline({
   sequenceRef.current = sequence;
   onDropOnLaneRef.current = onDropOnLane;
 
-  // Always include at least lanes -2 … +2 so there's visible room to layer items.
-  // Sort descending so +N is rendered at the top and -N at the bottom.
+  // Minimum lanes: only include lanes actually used. New lanes created on add/drop when needed.
   const lanes = useMemo(() => {
-    const set = new Set(sequence.scenes.map((s) => s.lane ?? 0));
-    // Also include lanes used by audio clips
-    for (const clip of (sequence.audioClips || [])) {
-      set.add(clip.lane);
-    }
-    // Default visible lanes
-    for (let l = -2; l <= 2; l++) set.add(l);
-    // If any content exists beyond ±2, add one extra empty lane as buffer
-    const minUsed = Math.min(...set);
-    const maxUsed = Math.max(...set);
-    set.add(minUsed - 1);
-    set.add(maxUsed + 1);
+    const set = new Set<number>();
+    for (const s of sequence.scenes) set.add(s.lane ?? 0);
+    for (const c of sequence.audioClips || []) set.add(c.lane);
+    if (set.size === 0) return [0]; // empty timeline: one lane for drops
     return Array.from(set).sort((a, b) => b - a);
   }, [sequence.scenes, sequence.audioClips]);
 
@@ -1120,6 +1163,25 @@ function Timeline({
   }, [expandedKeyframeScenes, sequence.scenes]);
 
   const trackContentHeight = Math.max(100, 24 + lanes.length * 40 + expandedKeyframeHeight);
+
+  // Map client Y to lane when dragging in empty region (no lane row under cursor)
+  const laneFromClientY = useCallback((clientY: number, scrollEl: HTMLElement): number => {
+    const rect = scrollEl.getBoundingClientRect();
+    const mouseY = clientY - rect.top + scrollEl.scrollTop;
+    const RULER_H = 24;
+    const PAD_TOP = 4;
+    // Account for top spacer when lanes are centered (container taller than content)
+    const extraHeight = Math.max(0, (containerHeight || 0) - trackContentHeight);
+    const topSpacerHeight = extraHeight / 2;
+    let y = RULER_H + topSpacerHeight + PAD_TOP;
+    for (let i = 0; i < lanes.length; i++) {
+      const h = lanes[i] === 0 ? 36 : 28;
+      if (mouseY >= y && mouseY < y + h) return lanes[i];
+      y += h + 2;
+    }
+    if (mouseY < RULER_H + topSpacerHeight + PAD_TOP) return lanes.length > 0 ? Math.max(...lanes) + 1 : 1;
+    return lanes.length > 0 ? Math.min(...lanes) - 1 : -1;
+  }, [lanes, containerHeight, trackContentHeight]);
 
   // Audio clips grouped by lane
   const audioClipsByLane = useMemo(() => {
@@ -1146,10 +1208,12 @@ function Timeline({
   // Zoom-aware scale: pxPerSec changes with timeline zoom level.
   const pxPerSec = TIMELINE_BASE_PX_PER_SEC * timelineZoom;
   const pxPerMs = pxPerSec / 1000;
-  const trackWidth = Math.max(TIMELINE_MIN_WIDTH, totalDurationMs * pxPerMs);
+  const contentWidth = Math.max(TIMELINE_MIN_WIDTH, totalDurationMs * pxPerMs);
+  // Extend track to fill visible container so timestamps are never cut off on the right
+  const trackWidth = Math.max(contentWidth, containerWidth);
   const frameDurationMs = 1000 / (sequence.fps || 60);
 
-  // Time ruler ticks — adapt spacing to zoom level so major ticks stay ~80-140px apart
+  // Time ruler ticks — extend across full track width so markers are visible throughout
   const totalSec = Math.max(totalDurationMs / 1000, 1);
   const rulerTicks = useMemo(() => {
     // Choose a "nice" major step so ticks are readable at any zoom
@@ -1160,7 +1224,8 @@ function Timeline({
     // Sub-divisions: split each major interval into minor ticks
     const subCount = step >= 10 ? 5 : step >= 1 ? 5 : step >= 0.1 ? 5 : 2;
     const subStep = step / subCount;
-    const endSec = totalSec + step;
+    // End ticks when we reach the full track width (in seconds)
+    const endSec = Math.max(totalSec + step, trackWidth / pxPerSec);
     const ticks: { sec: number; major: boolean }[] = [];
     for (let s = 0; s <= endSec; s = +(s + subStep).toFixed(6)) {
       // A tick is major when it falls on the major step grid
@@ -1168,7 +1233,7 @@ function Timeline({
       ticks.push({ sec: s, major: isMajor });
     }
     return ticks;
-  }, [totalSec, pxPerSec]);
+  }, [totalSec, pxPerSec, trackWidth]);
 
   // Playhead position — absolute px
   const playheadX = TIMELINE_LEFT_PAD + currentTimeMs * pxPerMs;
@@ -1290,6 +1355,20 @@ function Timeline({
     return { snappedMs: Math.max(0, bestMs), snapLineMs };
   };
 
+  // ── Track container size so ruler/track extend to fill visible area ─────
+  useEffect(() => {
+    const el = timelineRef.current;
+    if (!el) return;
+    const update = () => {
+      setContainerWidth(el.clientWidth);
+      setContainerHeight(el.clientHeight);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // ── Pinch / Ctrl+wheel zoom — non-passive so we can preventDefault ─────
   // Ref to hold the latest zoom so the non-passive listener closure always
   // reads the current value without needing to re-attach on every change.
@@ -1346,10 +1425,10 @@ function Timeline({
       const mouseXInContainer = e.clientX - rect.left + containerEl.scrollLeft;
       const rawMs = (mouseXInContainer - TIMELINE_LEFT_PAD) / pxPerMsRef.current - d.grabOffsetMs;
 
-      // Detect lane under cursor
+      // Detect lane under cursor; if in empty region, compute from Y to support drop-on-new-lane
       const target = document.elementFromPoint(e.clientX, e.clientY);
       const laneEl = target?.closest('[data-lane]');
-      const targetLane = laneEl ? Number(laneEl.getAttribute('data-lane')) : d.originalLane;
+      const targetLane = laneEl ? Number(laneEl.getAttribute('data-lane')) : laneFromClientY(e.clientY, containerEl);
 
       // Apply snapping
       const { snappedMs, snapLineMs } = snapClipPosition(
@@ -1390,7 +1469,7 @@ function Timeline({
       window.removeEventListener('mouseup', handleMouseUp);
       if (rafId !== null) cancelAnimationFrame(rafId);
     };
-  }, [clipDragActive]); // stable — only fires on start/stop
+  }, [clipDragActive, laneFromClientY]);
 
   // Handle seek by clicking on ruler (snaps to keyframe positions)
   const handleRulerClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -1585,6 +1664,7 @@ function Timeline({
   // Trim drag — snaps to frame boundaries for precision editing.
   // At higher zoom levels you get finer control; at low zoom the snap
   // keeps clips aligned to clean frame boundaries.
+  // Left trim also updates trimStartMs so the animation content stays in sync.
   useEffect(() => {
     if (!trimming) return;
     const handleMouseMove = (e: MouseEvent) => {
@@ -1601,7 +1681,13 @@ function Timeline({
         frameDurationMs, // minimum 1 frame
         Math.round(newDuration / frameDurationMs) * frameDurationMs,
       );
-      onUpdateScene(trimming.sceneId, { durationMs: snapped });
+      if (trimming.edge === 'left') {
+        const trimDelta = trimming.startDuration - snapped;
+        const newTrimStartMs = Math.max(0, trimming.startTrimStartMs + trimDelta);
+        onUpdateScene(trimming.sceneId, { durationMs: snapped, trimStartMs: Math.round(newTrimStartMs) });
+      } else {
+        onUpdateScene(trimming.sceneId, { durationMs: snapped });
+      }
     };
     const handleMouseUp = () => setTrimming(null);
     window.addEventListener('mousemove', handleMouseMove);
@@ -1667,14 +1753,28 @@ function Timeline({
       const rect = containerEl.getBoundingClientRect();
       const mouseXInContainer = e.clientX - rect.left + containerEl.scrollLeft;
       const rawMs = Math.max(0, (mouseXInContainer - TIMELINE_LEFT_PAD) / pxPerMsRef.current - d.grabOffsetMs);
+      const currentMs = Math.round(rawMs);
 
-      // Detect lane under cursor
+      // Detect lane under cursor; if in empty region, compute from Y
       const target = document.elementFromPoint(e.clientX, e.clientY);
       const laneEl = target?.closest('[data-lane]');
-      const targetLane = laneEl ? Number(laneEl.getAttribute('data-lane')) : d.originalLane;
+      const targetLane = laneEl ? Number(laneEl.getAttribute('data-lane')) : laneFromClientY(e.clientY, containerEl);
 
-      d.currentMs = Math.round(rawMs);
-      d.currentLane = targetLane;
+      // Never place on top of existing content
+      const seq = sequenceRef.current;
+      const clip = seq.audioClips?.find((c) => c.clipId === d.clipId);
+      const durationMs = clip ? Math.max(1, (clip.trimEndMs - clip.trimStartMs) || clip.fullDurationMs || 1000) : 1000;
+      const actualLane = findFreeLaneForAudioDrop(
+        seq.scenes,
+        seq.audioClips || [],
+        targetLane,
+        currentMs,
+        durationMs,
+        d.clipId
+      );
+
+      d.currentMs = currentMs;
+      d.currentLane = actualLane;
 
       onUpdateAudioClip(d.clipId, { startMs: d.currentMs, lane: d.currentLane });
     };
@@ -1690,7 +1790,7 @@ function Timeline({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [audioDragActive, onUpdateAudioClip]);
+  }, [audioDragActive, onUpdateAudioClip, laneFromClientY]);
 
   const handleAudioClipMouseDown = useCallback((
     e: React.MouseEvent,
@@ -1845,8 +1945,8 @@ function Timeline({
 
   return (
     <div className="h-full bg-background flex flex-col">
-      {/* Transport controls */}
-      <div className="px-4 py-2 border-b flex items-center gap-2">
+      {/* Transport controls — sticky so always visible when scrolling */}
+      <div className="sticky top-0 z-30 px-4 py-2 border-b flex items-center gap-2 flex-shrink-0 bg-background">
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onRestart}>
           <SkipBack className="h-3.5 w-3.5" />
         </Button>
@@ -1932,10 +2032,16 @@ function Timeline({
             }}
           />
         )}
-        <div className="relative" style={{ width: trackWidth + TIMELINE_LEFT_PAD * 2, minHeight: trackContentHeight }}>
-          {/* Ruler */}
+        <div
+          className="relative flex flex-col"
+          style={{
+            width: trackWidth + TIMELINE_LEFT_PAD * 2,
+            minHeight: Math.max(trackContentHeight, containerHeight || 0),
+          }}
+        >
+          {/* Ruler — sticky so time markers and playhead stay visible when scrolling tracks */}
           <div
-            className="h-6 border-b bg-muted/40 relative cursor-pointer select-none"
+            className="sticky top-0 z-20 h-6 border-b bg-background relative cursor-pointer select-none shrink-0"
             onClick={handleRulerClick}
             onMouseDown={(e) => { handleRulerClick(e); setSeekDragging(true); }}
           >
@@ -1956,11 +2062,25 @@ function Timeline({
                 </div>
               );
             })}
+            {/* Playhead — spans full available height (container or content, whichever is taller) */}
+            {(() => {
+              const playheadHeight = Math.max(trackContentHeight, containerHeight);
+              return (
+                <div
+                  className="absolute top-0 z-30 pointer-events-none overflow-visible"
+                  style={{ left: playheadX, height: playheadHeight, transform: 'translateX(-5px)' }}
+                >
+                  <PlayheadSvg height={playheadHeight} />
+                </div>
+              );
+            })()}
           </div>
 
+          {/* Spacers — center lanes vertically when container is taller than content */}
+          <div className="flex-1 min-h-0" aria-hidden />
           {/* Clips track — one row per lane (primary = lane 0, connected above/below) */}
           <div
-            className="relative flex flex-col gap-0.5 py-1"
+            className="relative flex flex-col gap-0.5 py-1 shrink-0"
             onMouseDown={handleTrackAreaMouseDown}
             style={{ cursor: isTlMarqueeing ? 'crosshair' : undefined }}
           >
@@ -2016,6 +2136,27 @@ function Timeline({
                           backgroundColor: color,
                         }}
                       >
+                        {/* Left trim handle */}
+                        <div
+                          data-trim-handle
+                          className="absolute left-0 top-0 w-2 h-full cursor-col-resize z-20 
+                                     bg-white/0 hover:bg-white/30 active:bg-white/50 rounded-l
+                                     transition-colors"
+                          onMouseDown={(e) => {
+                            e.stopPropagation(); e.preventDefault();
+                            setTrimming({
+                              sceneId: scene.sceneId,
+                              edge: 'left',
+                              startX: e.clientX,
+                              startDuration: scene.durationMs,
+                              startTrimStartMs: scene.trimStartMs ?? 0,
+                            });
+                          }}
+                        >
+                          <div className="absolute left-0.5 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-white/60 rounded-full
+                                          opacity-0 group-hover/clip:opacity-100 transition-opacity" />
+                        </div>
+
                         {/* Right trim handle (duration) */}
                         <div
                           data-trim-handle
@@ -2024,7 +2165,13 @@ function Timeline({
                                      transition-colors"
                           onMouseDown={(e) => {
                             e.stopPropagation(); e.preventDefault();
-                            setTrimming({ sceneId: scene.sceneId, edge: 'right', startX: e.clientX, startDuration: scene.durationMs });
+                            setTrimming({
+                              sceneId: scene.sceneId,
+                              edge: 'right',
+                              startX: e.clientX,
+                              startDuration: scene.durationMs,
+                              startTrimStartMs: scene.trimStartMs ?? 0,
+                            });
                           }}
                         >
                           <div className="absolute right-0.5 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-white/60 rounded-full
@@ -2410,6 +2557,9 @@ function Timeline({
             })}
           </div>
 
+          {/* Spacer — balances top spacer to center lanes vertically */}
+          <div className="flex-1 min-h-0" aria-hidden />
+
           {/* Timeline marquee overlay */}
           {tlMarqueeRect && (
             <div
@@ -2428,12 +2578,20 @@ function Timeline({
             const ghostLeft = TIMELINE_LEFT_PAD + clipDragRender.currentMs * pxPerMs;
             const ghostWidth = Math.max(30, clipDragRender.clipDurationMs * pxPerMs);
             const ghostColor = sceneColorForId(clipDragRender.sceneId);
-            // Find the lane row position for the ghost
+            const topSpacerH = Math.max(0, (containerHeight - trackContentHeight) / 2);
+            // Find the lane row position for the ghost (including virtual lanes when dropping in empty region)
             const laneIndex = lanes.indexOf(clipDragRender.currentLane);
-            const ghostTop = laneIndex >= 0
-              ? lanes.slice(0, laneIndex).reduce((sum, l) => sum + (l === 0 ? 36 : 28) + 2, 0) + 4 /* py-1 */
-              : 0;
             const laneHeight = clipDragRender.currentLane === 0 ? 36 : 28;
+            let ghostTop: number;
+            if (laneIndex >= 0) {
+              ghostTop = topSpacerH + lanes.slice(0, laneIndex).reduce((sum, l) => sum + (l === 0 ? 36 : 28) + 2, 0) + 4 /* py-1 */;
+            } else if (lanes.length > 0 && clipDragRender.currentLane > Math.max(...lanes)) {
+              ghostTop = topSpacerH + 4; /* above first lane */
+            } else if (lanes.length > 0 && clipDragRender.currentLane < Math.min(...lanes)) {
+              ghostTop = topSpacerH + lanes.reduce((sum, l) => sum + (l === 0 ? 36 : 28) + 2, 0) + 4 - 2; /* below last lane */
+            } else {
+              ghostTop = topSpacerH + 4;
+            }
             const ghostHeight = laneHeight - 4; /* match clip top-0.5 + bottom-0.5 */
 
             return (
@@ -2444,7 +2602,7 @@ function Timeline({
                   style={{
                     left: ghostLeft,
                     width: ghostWidth,
-                    top: 24 + ghostTop + 2, /* ruler(24) + py-1(4) + lanes above + top-0.5(2) */
+                    top: 24 + ghostTop + 2, /* ruler(24) + spacer + py-1(4) + lanes above + top-0.5(2) */
                     height: ghostHeight,
                     backgroundColor: ghostColor,
                     opacity: 0.5,
@@ -2466,14 +2624,6 @@ function Timeline({
               </>
             );
           })()}
-
-          {/* Playhead (spans full height: ruler + clips) */}
-          <div
-            className="absolute top-0 z-30 pointer-events-none"
-            style={{ left: playheadX, height: trackContentHeight, transform: 'translateX(-5px)' }}
-          >
-            <PlayheadSvg height={trackContentHeight} />
-          </div>
         </div>
       </div>
     </div>
@@ -2483,6 +2633,7 @@ function Timeline({
 // ─── Main Composer ────────────────────────────────────────────────────────────
 
 export function Composer() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const allAnimations = useAnimationRegistry();
   const { isDeleted } = useDeletedAnimations();
   const animations = useMemo(
@@ -2522,6 +2673,38 @@ export function Composer() {
   const exportAbortRef = useRef<AbortController | null>(null);
   const [selectedAudioClipId, setSelectedAudioClipId] = useState<string | null>(null);
   const [audioWaveforms, setAudioWaveforms] = useState<Map<string, number[]>>(new Map());
+  const [authDialogOpen, setAuthDialogOpen] = useState(false);
+
+  const workspace = useWorkspace();
+  const auth = useAuth();
+
+  // Load sequence from URL when opening from Sequences gallery (?open=id)
+  const openIdHandledRef = useRef(false);
+  useEffect(() => {
+    const openId = searchParams.get('open');
+    if (!openId || openIdHandledRef.current) return;
+    openIdHandledRef.current = true;
+
+    const doLoad = async () => {
+      let loaded: Sequence | null = null;
+      if (workspace.useCloud) {
+        loaded = await workspace.loadSequence(openId);
+      } else {
+        loaded = loadSequence(openId);
+      }
+      if (loaded) {
+        setSequence(loaded);
+        setSelectedSceneIds(new Set());
+        toast.success(`Loaded "${loaded.name}"`);
+      }
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('open');
+        return next;
+      }, { replace: true });
+    };
+    doLoad();
+  }, [searchParams, workspace.useCloud, workspace.loadSequence, setSearchParams]);
 
   // Player state
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -2552,6 +2735,13 @@ export function Composer() {
   const lastInteractionEndRef = useRef(0);
 
   const audioFileInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Copy / Paste clipboard (in-memory) ───────────────────────────────────────
+  const clipboardRef = useRef<
+    | { type: 'scenes'; items: SceneEntry[]; timings: { startMs: number; endMs: number }[] }
+    | { type: 'audio'; items: AudioClipEntry[] }
+    | null
+  >(null);
 
   // ── Undo / Redo ─────────────────────────────────────────────────────────────
   // Watches `sequence` via an effect with debounced commits so rapid changes
@@ -2666,14 +2856,20 @@ export function Composer() {
     setTotalDurationMs(getSequenceDurationMs(sequence.scenes, sequence.audioClips));
   }, [sequence.scenes, sequence.audioClips]);
 
-  // Auto-save to localStorage (debounced 2s)
+  // Auto-save (debounced 2s) - cloud when signed in, localStorage otherwise
   useEffect(() => {
     if (sequence.scenes.length === 0 && sequence.name === 'Untitled Sequence') return;
     const t = setTimeout(() => {
-      saveSequence(sequence);
+      if (workspace.useCloud) {
+        workspace.saveSequence(sequence).then(({ error }) => {
+          if (error) console.warn('Auto-save failed:', error.message);
+        });
+      } else {
+        saveSequence(sequence);
+      }
     }, 2000);
     return () => clearTimeout(t);
-  }, [sequence]);
+  }, [sequence, workspace.useCloud, workspace.saveSequence]);
 
   // ─── Audio clip waveform computation ──────────────────────────────────────
 
@@ -2825,21 +3021,56 @@ export function Composer() {
 
   // ─── Save / Load / Export / Import ─────────────────────────────────────────
 
-  const handleSave = useCallback(() => {
-    saveSequence(sequence);
-    toast.success('Sequence saved');
-  }, [sequence]);
+  const handleSave = useCallback(async () => {
+    if (workspace.useCloud) {
+      const { error } = await workspace.saveSequence(sequence);
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+      toast.success('Sequence saved to cloud');
+    } else {
+      saveSequence(sequence);
+      toast.success('Sequence saved');
+    }
+  }, [sequence, workspace.useCloud, workspace.saveSequence]);
 
-  const handleLoad = useCallback((id: string) => {
-    const loaded = loadSequence(id);
-    if (!loaded) {
-      toast.error('Failed to load sequence');
+  const handlePromote = useCallback(async () => {
+    if (!workspace.useCloud) return;
+    const { error } = await workspace.saveSequence(sequence);
+    if (error) {
+      toast.error(error.message);
       return;
     }
-    setSequence(loaded);
-    setSelectedSceneIds(new Set());
-    toast.success(`Loaded "${loaded.name}"`);
-  }, []);
+    const { error: promoteError } = await workspace.promoteSequence(sequence.id);
+    if (promoteError) toast.error(promoteError.message);
+    else {
+      workspace.refreshSequences();
+      toast.success('Sequence promoted to public');
+    }
+  }, [sequence, workspace]);
+
+  const handleLoad = useCallback(async (id: string) => {
+    if (workspace.useCloud) {
+      const loaded = await workspace.loadSequence(id);
+      if (!loaded) {
+        toast.error('Failed to load sequence');
+        return;
+      }
+      setSequence(loaded);
+      setSelectedSceneIds(new Set());
+      toast.success(`Loaded "${loaded.name}"`);
+    } else {
+      const loaded = loadSequence(id);
+      if (!loaded) {
+        toast.error('Failed to load sequence');
+        return;
+      }
+      setSequence(loaded);
+      setSelectedSceneIds(new Set());
+      toast.success(`Loaded "${loaded.name}"`);
+    }
+  }, [workspace.useCloud, workspace.loadSequence]);
 
   const openExportMp4Dialog = useCallback(() => {
     setExportWidth(sequence.width);
@@ -2909,6 +3140,14 @@ export function Composer() {
     e.target.value = '';
     if (!file) return;
     const url = URL.createObjectURL(file);
+    // Place at playhead; use 10s as placeholder duration for lane-finding (waveform will set actual)
+    const placeholderDurationMs = 10000;
+    const freeLane = findFreeLaneForAudio(
+      sequence.scenes,
+      sequence.audioClips || [],
+      currentTimeMs,
+      placeholderDurationMs
+    );
     const newClip: AudioClipEntry = {
       clipId: generateAudioClipId(),
       audioUrl: url,
@@ -2917,8 +3156,8 @@ export function Composer() {
       trimStartMs: 0,
       trimEndMs: 0, // 0 means full duration, resolved by waveform effect
       volume: 1,
-      startMs: 0,
-      lane: -1,
+      startMs: currentTimeMs,
+      lane: freeLane,
       label: file.name.replace(/\.[^.]+$/, ''),
     };
     setSequence((prev) => ({
@@ -2928,7 +3167,7 @@ export function Composer() {
     setSelectedSceneIds(new Set());
     setSelectedAudioClipId(newClip.clipId);
     toast.success(`Audio "${file.name}" added to timeline`);
-  }, []);
+  }, [sequence.scenes, sequence.audioClips, currentTimeMs]);
 
   const openAudioPicker = useCallback(() => audioFileInputRef.current?.click(), []);
 
@@ -2950,6 +3189,28 @@ export function Composer() {
     }));
     setSelectedAudioClipId((prev) => (prev === clipId ? null : prev));
   }, []);
+
+  const duplicateAudioClip = useCallback((clipId: string) => {
+    const clip = sequence.audioClips?.find((c) => c.clipId === clipId);
+    if (!clip) return;
+    const durationMs = Math.max(1, (clip.trimEndMs - clip.trimStartMs) || clip.fullDurationMs || 1000);
+    // Do NOT exclude original — we need a lane that's truly free (including the original)
+    const freeLane = findFreeLaneForAudio(
+      sequence.scenes,
+      sequence.audioClips || [],
+      clip.startMs,
+      durationMs
+    );
+    const newClip: AudioClipEntry = {
+      ...clip,
+      clipId: generateAudioClipId(),
+      startMs: clip.startMs,
+      lane: freeLane,
+      label: clip.label ? `${clip.label} (copy)` : clip.label,
+    };
+    setSequence((prev) => ({ ...prev, audioClips: [...prev.audioClips, newClip] }));
+    setSelectedAudioClipId(newClip.clipId);
+  }, [sequence.scenes, sequence.audioClips]);
 
   const handleSelectAudioClip = useCallback((id: string | null) => {
     setSelectedAudioClipId(id);
@@ -3000,6 +3261,105 @@ export function Composer() {
           redo();
         } else {
           undo();
+        }
+        return;
+      }
+
+      // Copy
+      if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
+        if (selectedSceneIds.size > 0) {
+          e.preventDefault();
+          const items = sequence.scenes.filter((s) => selectedSceneIds.has(s.sceneId));
+          if (items.length > 0) {
+            const timings = getSceneTimings(sequence.scenes);
+            const copiedTimings = items.map((s) => {
+              const idx = sequence.scenes.findIndex((x) => x.sceneId === s.sceneId);
+              return timings[idx] ?? { startMs: 0, endMs: s.durationMs };
+            });
+            clipboardRef.current = { type: 'scenes', items: items.map((s) => ({ ...s })), timings: copiedTimings };
+          }
+        } else if (selectedAudioClipId) {
+          e.preventDefault();
+          const clip = sequence.audioClips?.find((c) => c.clipId === selectedAudioClipId);
+          if (clip) clipboardRef.current = { type: 'audio', items: [{ ...clip }] };
+        }
+        return;
+      }
+
+      // Paste (at playhead, no overlap)
+      if ((e.metaKey || e.ctrlKey) && e.key === 'v') {
+        const cb = clipboardRef.current;
+        if (!cb) return;
+        e.preventDefault();
+        if (cb.type === 'scenes') {
+          const primaryScenes = sequence.scenes.filter((s) => (s.lane ?? 0) === 0);
+          const primaryTimings = getSceneTimings(primaryScenes);
+          const minStart = Math.min(...cb.timings.map((t) => t.startMs));
+          const idMap = new Map<string, string>();
+          const newScenes: SceneEntry[] = cb.items.map((s) => {
+            const newId = generateSceneId();
+            idMap.set(s.sceneId, newId);
+            return { ...s, sceneId: newId };
+          });
+          const primaryNew = newScenes.filter((s) => (s.lane ?? 0) === 0);
+          const overlayNew = newScenes.filter((s) => (s.lane ?? 0) !== 0);
+          let cursor = 0;
+          let insertIndex = 0;
+          for (let k = 0; k < primaryScenes.length; k++) {
+            if (cursor <= currentTimeMs) insertIndex = k;
+            const end = primaryTimings[k]?.endMs ?? 0;
+            cursor = end - (primaryScenes[k].transition?.durationMs ?? 0);
+          }
+          if (cursor <= currentTimeMs) insertIndex = primaryScenes.length;
+          const futurePrimary = [...primaryScenes];
+          futurePrimary.splice(insertIndex, 0, ...primaryNew);
+          const futurePrimaryTimings = getSceneTimings(futurePrimary);
+          let scenesSoFar = [...sequence.scenes];
+          for (const s of overlayNew) {
+            const i = newScenes.indexOf(s);
+            const origTiming = i >= 0 ? cb.timings[i] : undefined;
+            const tStart = currentTimeMs + ((origTiming?.startMs ?? 0) - minStart);
+            const tEnd = tStart + s.durationMs;
+            const freeLane = findFreeLaneForOverlay(scenesSoFar, sequence.audioClips || [], tStart, tEnd);
+            const anchorIdx = futurePrimaryTimings.findIndex((t) => tStart >= t.startMs && tStart < t.endMs);
+            const anchor = anchorIdx >= 0 ? futurePrimary[anchorIdx] : futurePrimary[futurePrimary.length - 1];
+            const anchorStart = anchor && anchorIdx >= 0 ? futurePrimaryTimings[anchorIdx].startMs : 0;
+            s.lane = freeLane;
+            s.connectedTo = anchor?.sceneId;
+            s.connectedOffsetMs = anchor ? Math.round(tStart - anchorStart) : 0;
+            scenesSoFar = [...scenesSoFar, s];
+          }
+          setSequence((prev) => {
+            const primaryWithout = prev.scenes.filter((s) => (s.lane ?? 0) === 0);
+            const connected = prev.scenes.filter((s) => (s.lane ?? 0) !== 0);
+            const newPrimary = [...primaryWithout];
+            newPrimary.splice(insertIndex, 0, ...primaryNew);
+            return { ...prev, scenes: [...newPrimary, ...connected, ...overlayNew] };
+          });
+          setSelectedSceneIds(new Set(newScenes.map((s) => s.sceneId)));
+        } else if (cb.type === 'audio') {
+          const pasted: AudioClipEntry[] = [];
+          let pasteStartMs = currentTimeMs;
+          for (const clip of cb.items) {
+            const durationMs = Math.max(1, (clip.trimEndMs - clip.trimStartMs) || clip.fullDurationMs || 1000);
+            const freeLane = findFreeLaneForAudio(
+              sequence.scenes,
+              [...(sequence.audioClips || []), ...pasted],
+              pasteStartMs,
+              durationMs
+            );
+            pasted.push({
+              ...clip,
+              clipId: generateAudioClipId(),
+              startMs: pasteStartMs,
+              lane: freeLane,
+              label: clip.label ? `${clip.label} (copy)` : clip.label,
+            });
+            pasteStartMs += durationMs;
+          }
+          setSequence((prev) => ({ ...prev, audioClips: [...prev.audioClips, ...pasted] }));
+          setSelectedAudioClipId(pasted[pasted.length - 1]?.clipId ?? null);
+          setSelectedSceneIds(new Set());
         }
         return;
       }
@@ -3063,7 +3423,7 @@ export function Composer() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedSceneIds, selectedAudioClipId, selectedKfs, togglePlay, undo, redo, sequence.fps, currentTimeMs, totalDurationMs, handleSeek]);
+  }, [selectedSceneIds, selectedAudioClipId, selectedKfs, togglePlay, undo, redo, sequence, currentTimeMs, totalDurationMs, handleSeek]);
 
   // ─── Canvas zoom/pan ──────────────────────────────────────────────────────
 
@@ -3482,14 +3842,31 @@ export function Composer() {
     const entry = animations.find((e) => getAnimationId(e) === animationId);
     if (!entry) return;
     const name = getAnimationName(entry);
+    const durationMs = entry.definition.durationMs ?? 3000;
     const newScene: SceneEntry = {
       sceneId: generateSceneId(),
       animationId,
-      durationMs: entry.definition.durationMs ?? 3000,
+      durationMs,
       transition: { type: 'cut', durationMs: 0 },
       label: name,
+      lane: 0,
     };
-    setSequence((prev) => ({ ...prev, scenes: [...prev.scenes, newScene] }));
+    setSequence((prev) => {
+      const primary = prev.scenes.filter((s) => (s.lane ?? 0) === 0);
+      const connected = prev.scenes.filter((s) => (s.lane ?? 0) !== 0);
+      const primaryTimings = getSceneTimings(primary);
+      let cursor = 0;
+      let insertIndex = 0;
+      for (let k = 0; k < primary.length; k++) {
+        if (cursor <= currentTimeMs) insertIndex = k;
+        const end = primaryTimings[k]?.endMs ?? 0;
+        cursor = end - (primary[k].transition?.durationMs ?? 0);
+      }
+      if (cursor <= currentTimeMs) insertIndex = primary.length;
+      const newPrimary = [...primary];
+      newPrimary.splice(insertIndex, 0, newScene);
+      return { ...prev, scenes: [...newPrimary, ...connected] };
+    });
     setSelectedSceneIds(new Set([newScene.sceneId]));
     setPickerOpen(false);
     setPickerSearch('');
@@ -3506,16 +3883,33 @@ export function Composer() {
     const config = { ...customCodeConfig };
     const name = config.name || 'Custom Animation';
     const animId = `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const durationMs = config.durationMs ?? 3000;
     const newScene: SceneEntry = {
       sceneId: generateSceneId(),
       animationId: animId,
-      durationMs: config.durationMs ?? 3000,
+      durationMs,
       transition: { type: 'cut', durationMs: 0 },
       label: name,
       customCode,
       customCodeConfig: config,
+      lane: 0,
     };
-    setSequence((prev) => ({ ...prev, scenes: [...prev.scenes, newScene] }));
+    setSequence((prev) => {
+      const primary = prev.scenes.filter((s) => (s.lane ?? 0) === 0);
+      const connected = prev.scenes.filter((s) => (s.lane ?? 0) !== 0);
+      const primaryTimings = getSceneTimings(primary);
+      let cursor = 0;
+      let insertIndex = 0;
+      for (let k = 0; k < primary.length; k++) {
+        if (cursor <= currentTimeMs) insertIndex = k;
+        const end = primaryTimings[k]?.endMs ?? 0;
+        cursor = end - (primary[k].transition?.durationMs ?? 0);
+      }
+      if (cursor <= currentTimeMs) insertIndex = primary.length;
+      const newPrimary = [...primary];
+      newPrimary.splice(insertIndex, 0, newScene);
+      return { ...prev, scenes: [...newPrimary, ...connected] };
+    });
     setSelectedSceneIds(new Set([newScene.sceneId]));
     setPickerOpen(false);
     setPickerTab('gallery');
@@ -3535,10 +3929,43 @@ export function Composer() {
   const duplicateScene = (sceneId: string) => {
     const idx = sequence.scenes.findIndex((s) => s.sceneId === sceneId);
     if (idx === -1) return;
-    const copy: SceneEntry = { ...sequence.scenes[idx], sceneId: generateSceneId(), label: sequence.scenes[idx].label ? `${sequence.scenes[idx].label} (copy)` : undefined };
-    const newScenes = [...sequence.scenes];
-    newScenes.splice(idx + 1, 0, copy);
-    setSequence((prev) => ({ ...prev, scenes: newScenes }));
+    const original = sequence.scenes[idx];
+    const timings = getSceneTimings(sequence.scenes);
+    const timing = timings[idx];
+    const startMs = timing?.startMs ?? 0;
+    const endMs = timing?.endMs ?? startMs + original.durationMs;
+    const lane = original.lane ?? 0;
+
+    const copy: SceneEntry = {
+      ...original,
+      sceneId: generateSceneId(),
+      label: original.label ? `${original.label} (copy)` : undefined,
+    };
+
+    if (lane === 0) {
+      // Primary: insert after original (sequential, no overlap)
+      const newScenes = [...sequence.scenes];
+      newScenes.splice(idx + 1, 0, copy);
+      setSequence((prev) => ({ ...prev, scenes: newScenes }));
+    } else {
+      // Overlay: find free lane to avoid overlap
+      const freeLane = findFreeLaneForOverlay(
+        sequence.scenes,
+        sequence.audioClips || [],
+        startMs,
+        endMs,
+        sceneId
+      );
+      const primaryScenes = sequence.scenes.filter((s) => (s.lane ?? 0) === 0);
+      const primaryTimings = getSceneTimings(primaryScenes);
+      const anchorIdx = primaryTimings.findIndex((t) => startMs >= t.startMs && startMs < t.endMs);
+      const anchor = anchorIdx >= 0 ? primaryScenes[anchorIdx] : primaryScenes[primaryScenes.length - 1];
+      const anchorStart = anchor && anchorIdx >= 0 ? primaryTimings[anchorIdx].startMs : 0;
+      copy.lane = freeLane;
+      copy.connectedTo = anchor?.sceneId;
+      copy.connectedOffsetMs = anchor ? Math.round(startMs - anchorStart) : 0;
+      setSequence((prev) => ({ ...prev, scenes: [...prev.scenes, copy] }));
+    }
     setSelectedSceneIds(new Set([copy.sceneId]));
   };
 
@@ -3725,6 +4152,7 @@ export function Composer() {
     if (!scene) return;
     const primaryScenes = sequence.scenes.filter((s) => (s.lane ?? 0) === 0);
     const primaryTimings = getSceneTimings(primaryScenes);
+    const durationMs = scene.durationMs;
 
     if (targetLane === 0) {
       let cursor = 0;
@@ -3746,13 +4174,23 @@ export function Composer() {
       return;
     }
 
+    // For overlay lanes: ensure we never place on top of existing content
+    const actualLane = findFreeLaneForSceneDrop(
+      sequence.scenes,
+      sequence.audioClips || [],
+      targetLane,
+      targetTimeMs,
+      durationMs,
+      sceneId
+    );
+
     const anchorIdx = primaryTimings.findIndex(
       (t) => targetTimeMs >= t.startMs && targetTimeMs < t.endMs
     );
     const anchor = anchorIdx >= 0 ? primaryScenes[anchorIdx] : primaryScenes[primaryScenes.length - 1];
     const anchorStart = anchor && anchorIdx >= 0 ? primaryTimings[anchorIdx].startMs : 0;
     updateScene(sceneId, {
-      lane: targetLane,
+      lane: actualLane,
       connectedTo: anchor?.sceneId,
       connectedOffsetMs: anchor ? Math.round(targetTimeMs - anchorStart) : 0,
     });
@@ -3921,8 +4359,11 @@ export function Composer() {
       <header className="sticky top-0 z-40 border-b bg-background flex-shrink-0">
         <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-3 min-w-0">
-            <Button variant="ghost" size="icon" asChild className="flex-shrink-0">
+            <Button variant="ghost" size="icon" asChild className="flex-shrink-0" title="Gallery">
               <Link to="/"><ArrowLeft className="h-5 w-5" /></Link>
+            </Button>
+            <Button variant="ghost" size="icon" asChild className="flex-shrink-0" title="Sequences">
+              <Link to="/?tab=sequences"><Film className="h-5 w-5" /></Link>
             </Button>
             <div className="flex items-center gap-2 min-w-0">
               <Layers className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -3947,6 +4388,12 @@ export function Composer() {
               <Save className="h-3.5 w-3.5" />
               <span className="hidden sm:inline text-xs">Save</span>
             </Button>
+            {workspace.useCloud && (
+              <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={handlePromote} title="Make public">
+                <Globe className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline text-xs">Make Public</span>
+              </Button>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="sm" className="h-8 gap-1.5">
@@ -3955,12 +4402,14 @@ export function Composer() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="max-h-64 overflow-y-auto">
-                <DropdownMenuLabel>Saved sequences</DropdownMenuLabel>
+                <DropdownMenuLabel>Saved sequences{workspace.useCloud && ' (cloud)'}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                {listSavedSequences().length === 0 ? (
+                {workspace.useCloud && workspace.sequencesLoading ? (
+                  <DropdownMenuItem disabled>Loading...</DropdownMenuItem>
+                ) : (workspace.useCloud ? workspace.sequences : listSavedSequences()).length === 0 ? (
                   <DropdownMenuItem disabled>No saved sequences</DropdownMenuItem>
                 ) : (
-                  listSavedSequences().map((meta) => (
+                  (workspace.useCloud ? workspace.sequences : listSavedSequences()).map((meta) => (
                     <DropdownMenuItem
                       key={meta.id}
                       onClick={() => handleLoad(meta.id)}
@@ -3972,6 +4421,7 @@ export function Composer() {
                     </DropdownMenuItem>
                   ))
                 )}
+                
               </DropdownMenuContent>
             </DropdownMenu>
             <Button
@@ -3991,10 +4441,40 @@ export function Composer() {
               className="hidden"
               onChange={handleAudioFileSelect}
             />
+            {auth.isConfigured && (
+              auth.user ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-8 gap-1.5">
+                      <User className="h-3.5 w-3.5" />
+                      <span className="hidden sm:inline text-xs max-w-[120px] truncate">
+                        {auth.user.email}
+                      </span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuLabel className="font-normal">
+                      {workspace.workspace?.name ?? 'Workspace'}
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => auth.signOut()}>
+                      <LogOut className="h-4 w-4" />
+                      Sign out
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={() => setAuthDialogOpen(true)}>
+                  <LogIn className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline text-xs">Sign in</span>
+                </Button>
+              )
+            )}
             <ThemeToggle />
           </div>
         </div>
       </header>
+      <AuthDialog open={authDialogOpen} onOpenChange={setAuthDialogOpen} />
 
       {/* ── Main area ── */}
       <div className="flex-1 flex min-h-0 overflow-hidden">
@@ -4201,6 +4681,7 @@ export function Composer() {
               clip={selectedAudioClip}
               onUpdate={(updates) => updateAudioClip(selectedAudioClip.clipId, updates)}
               onRemove={() => removeAudioClip(selectedAudioClip.clipId)}
+              onDuplicate={() => duplicateAudioClip(selectedAudioClip.clipId)}
             />
           ) : selectedScene ? (
             <SceneSettingsSidebar

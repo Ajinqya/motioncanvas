@@ -362,7 +362,10 @@ export function generateExternalEditorCode<P = Record<string, unknown>>(
               return `(${cleanParams})`;
             })
             // Remove const type annotations: const x: Type = -> const x =  
-            .replace(/const\s+(\w+)\s*:\s*[^=]+=\s*/g, 'const $1 = ');
+            .replace(/const\s+(\w+)\s*:\s*[^=]+=\s*/g, 'const $1 = ')
+            // Remove TS non-null assertion operator (postfix `!`)
+            // Examples: foo!.bar → foo.bar, getContext('2d')!; → getContext('2d');
+            .replace(/([\w\)\]\}])!\s*(?=[\.\;\,\)\]\}\[\(])/g, '$1');
         })
         .join('\n\n');
     }
@@ -400,6 +403,13 @@ export function generateExternalEditorCode<P = Record<string, unknown>>(
     'function render(ctx, { width, height, progress }) {',
     '  // Parameters',
     ...paramLines,
+    '',
+    '  // Timing helpers (some gallery animations use `time` / `frame`)',
+    `  const durationMs = ${animation.durationMs ?? 3000};`,
+    `  const fps = ${animation.fps ?? 60};`,
+    '  const time = (progress * durationMs) / 1000;',
+    '  const deltaTime = 1 / fps;',
+    '  const frame = Math.floor(time * fps);',
   ];
   
   // Add external dependencies if any

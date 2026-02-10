@@ -1,0 +1,19 @@
+{
+  "id": "meeting-notes-scene1",
+  "name": "Meeting Notes Scene 1",
+  "createdAt": "2026-02-10T00:00:00.000Z",
+  "updatedAt": "2026-02-10T07:50:03.199Z",
+  "source": {
+    "type": "design",
+    "notes": "Granola meeting notes motion design - word reveals and pop-in text"
+  },
+  "prompt": "Meeting notes scene: 'Now your meeting notes can power what you're building in other apps' - word reveal animations, pop-in text, Instrument Serif, smooth easing",
+  "tags": [
+    "text",
+    "reveal",
+    "typography",
+    "meeting-notes",
+    "granola",
+    "word-animation"
+  ]
+}

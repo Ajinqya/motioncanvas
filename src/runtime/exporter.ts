@@ -85,7 +85,17 @@ async function mixAudioClips(
       source.buffer = decoded;
 
       const gainNode = offline.createGain();
-      gainNode.gain.value = clip.volume;
+      const fadeInSec = (clip.fadeInMs ?? 0) / 1000;
+      const fadeOutSec = (clip.fadeOutMs ?? 0) / 1000;
+      gainNode.gain.setValueAtTime(fadeInSec > 0 ? 0 : clip.volume, startOffsetSec);
+      if (fadeInSec > 0) {
+        gainNode.gain.linearRampToValueAtTime(clip.volume, startOffsetSec + fadeInSec);
+      }
+      if (fadeOutSec > 0) {
+        const fadeOutStartSec = startOffsetSec + Math.max(0, effectiveDuration - fadeOutSec);
+        gainNode.gain.setValueAtTime(clip.volume, fadeOutStartSec);
+        gainNode.gain.linearRampToValueAtTime(0, startOffsetSec + effectiveDuration);
+      }
 
       source.connect(gainNode);
       gainNode.connect(offline.destination);

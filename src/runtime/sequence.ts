@@ -74,6 +74,8 @@ export interface SceneEntry {
   animationId: string;
   /** Duration for this scene in ms (overrides animation's own duration) */
   durationMs: number;
+  /** Trim from start: skip this many ms at the beginning of the animation (default 0) */
+  trimStartMs?: number;
   /** Optional param overrides for this scene */
   params?: Record<string, unknown>;
   /** Per-scene transform (scale, position, opacity) */
@@ -131,6 +133,10 @@ export interface AudioClipEntry {
   trimEndMs: number;
   /** Playback volume 0-1 */
   volume: number;
+  /** Fade in duration in ms (ramps from 0 to volume at clip start) */
+  fadeInMs?: number;
+  /** Fade out duration in ms (ramps from volume to 0 at clip end) */
+  fadeOutMs?: number;
   /** Position on the timeline in ms (absolute) */
   startMs: number;
   /** Lane: 0 = primary row, positive = above, negative = below */
@@ -172,6 +178,19 @@ const BG_PARAM_KEYS = [
 
 /** Primary storyline = lane 0 or undefined. Connected clips have lane !== 0 and connectedTo set. */
 
+/** Compute animation progress (0..1) for a scene at localMs, accounting for trimStartMs. */
+export function getSceneProgress(
+  scene: SceneEntry,
+  localMs: number,
+  animDurationMs?: number
+): number {
+  const trim = scene.trimStartMs ?? 0;
+  if (scene.durationMs <= 0) return 0;
+  if (trim === 0) return Math.min(1, localMs / scene.durationMs);
+  const sourceEnd = animDurationMs ?? (trim + scene.durationMs);
+  return Math.min(1, Math.max(0, (trim + localMs) / sourceEnd));
+}
+
 /** Calculate start/end time (ms) for each scene. Primary clips are sequential (magnetic); connected clips use anchor + offset. */
 export function getSceneTimings(scenes: SceneEntry[]): { startMs: number; endMs: number }[] {
   const primaryScenes = scenes.filter((s) => (s.lane ?? 0) === 0);
@@ -208,6 +227,110 @@ export function getSequenceDurationMs(scenes: SceneEntry[], audioClips: AudioCli
     ? Math.max(...audioClips.map((c) => c.startMs + (c.trimEndMs - c.trimStartMs)))
     : 0;
   return Math.max(maxScene, maxAudio);
+}
+
+/** Check if a lane has any overlapping content in [startMs, endMs) */
+function isLaneOccupied(
+  lane: number,
+  startMs: number,
+  endMs: number,
+  scenes: SceneEntry[],
+  audioClips: AudioClipEntry[],
+  timings: { startMs: number; endMs: number }[],
+  excludeSceneId?: string,
+  excludeClipId?: string
+): boolean {
+  const overlaps = (a: number, b: number, c: number, d: number) => a < d && c < b;
+  for (let i = 0; i < scenes.length; i++) {
+    const s = scenes[i];
+    if ((s.lane ?? 0) !== lane || s.sceneId === excludeSceneId) continue;
+    const t = timings[i];
+    if (!t) continue;
+    if (overlaps(startMs, endMs, t.startMs, t.endMs)) return true;
+  }
+  for (const c of audioClips) {
+    if (c.lane !== lane || c.clipId === excludeClipId) continue;
+    const cEnd = c.startMs + (c.trimEndMs - c.trimStartMs);
+    if (overlaps(startMs, endMs, c.startMs, cEnd)) return true;
+  }
+  return false;
+}
+
+/**
+ * Find the first free lane for an audio clip at [startMs, endMs).
+ * Prefers negative lanes (audio typically lives below primary).
+ */
+export function findFreeLaneForAudio(
+  scenes: SceneEntry[],
+  audioClips: AudioClipEntry[],
+  startMs: number,
+  durationMs: number,
+  excludeClipId?: string
+): number {
+  const timings = getSceneTimings(scenes);
+  const endMs = startMs + durationMs;
+  // Try lanes from -1 downward (audio convention)
+  for (let lane = -1; lane >= -20; lane--) {
+    if (!isLaneOccupied(lane, startMs, endMs, scenes, audioClips, timings, undefined, excludeClipId)) return lane;
+  }
+  return -21; // fallback
+}
+
+/**
+ * Find the first free lane for an overlay scene at [startMs, endMs).
+ * Prefers positive lanes (overlays typically above primary).
+ */
+export function findFreeLaneForOverlay(
+  scenes: SceneEntry[],
+  audioClips: AudioClipEntry[],
+  startMs: number,
+  endMs: number,
+  excludeSceneId?: string
+): number {
+  const timings = getSceneTimings(scenes);
+  // Try lanes from +1 upward
+  for (let lane = 1; lane <= 20; lane++) {
+    if (!isLaneOccupied(lane, startMs, endMs, scenes, audioClips, timings, excludeSceneId, undefined)) return lane;
+  }
+  return 21;
+}
+
+/**
+ * Find a free lane for a scene at targetTimeMs.
+ * For lane 0 (primary) returns 0; caller handles insert. For non-zero, finds first free overlay lane.
+ */
+export function findFreeLaneForSceneDrop(
+  scenes: SceneEntry[],
+  audioClips: AudioClipEntry[],
+  targetLane: number,
+  targetTimeMs: number,
+  durationMs: number,
+  excludeSceneId?: string
+): number {
+  if (targetLane === 0) return 0;
+  const timings = getSceneTimings(scenes);
+  const startMs = targetTimeMs;
+  const endMs = targetTimeMs + durationMs;
+  if (!isLaneOccupied(targetLane, startMs, endMs, scenes, audioClips, timings, excludeSceneId, undefined)) return targetLane;
+  return findFreeLaneForOverlay(scenes, audioClips, startMs, endMs, excludeSceneId);
+}
+
+/**
+ * Find a free lane for an audio clip at targetTimeMs.
+ */
+export function findFreeLaneForAudioDrop(
+  scenes: SceneEntry[],
+  audioClips: AudioClipEntry[],
+  targetLane: number,
+  targetTimeMs: number,
+  durationMs: number,
+  excludeClipId?: string
+): number {
+  const timings = getSceneTimings(scenes);
+  const startMs = targetTimeMs;
+  const endMs = targetTimeMs + durationMs;
+  if (!isLaneOccupied(targetLane, startMs, endMs, scenes, audioClips, timings, undefined, excludeClipId)) return targetLane;
+  return findFreeLaneForAudio(scenes, audioClips, startMs, durationMs, excludeClipId);
 }
 
 /** Generate a unique scene id */
@@ -461,6 +584,20 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
     return undefined;
   }
 
+  function getClipVolumeAtTime(clip: AudioClipEntry, timeMs: number): number {
+    const effectiveDur = clip.trimEndMs - clip.trimStartMs;
+    const clipStart = clip.startMs;
+    const clipEnd = clipStart + effectiveDur;
+    if (timeMs < clipStart || timeMs >= clipEnd) return 0;
+    const posInClip = timeMs - clipStart;
+    const fadeIn = clip.fadeInMs ?? 0;
+    const fadeOut = clip.fadeOutMs ?? 0;
+    let gain = clip.volume;
+    if (fadeIn > 0 && posInClip < fadeIn) gain *= posInClip / fadeIn;
+    if (fadeOut > 0 && posInClip > effectiveDur - fadeOut) gain *= (effectiveDur - posInClip) / fadeOut;
+    return gain;
+  }
+
   function syncAudioElements() {
     if (!manageAudio) return;
     const clips = sequence.audioClips || [];
@@ -485,7 +622,7 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
         el.load();
         audioElements.set(clip.clipId, el);
       }
-      el.volume = clip.volume;
+      el.volume = getClipVolumeAtTime(clip, currentTimeMs);
       // Connect analyser for this clip (idempotent)
       connectAnalyser(clip.clipId, el);
     }
@@ -499,6 +636,7 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
       if (!el) continue;
       const effectiveDur = clip.trimEndMs - clip.trimStartMs;
       if (timeMs >= clip.startMs && timeMs < clip.startMs + effectiveDur) {
+        el.volume = getClipVolumeAtTime(clip, timeMs);
         const audioTimeSec = (clip.trimStartMs + (timeMs - clip.startMs)) / 1000;
         el.currentTime = audioTimeSec;
         el.play().catch(() => {});
@@ -516,6 +654,7 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
       const clipStart = clip.startMs;
       const clipEnd = clipStart + effectiveDur;
       if (currentTimeMs >= clipStart && currentTimeMs < clipEnd) {
+        el.volume = getClipVolumeAtTime(clip, currentTimeMs);
         if (el.paused) {
           const audioTimeSec = (clip.trimStartMs + (currentTimeMs - clipStart)) / 1000;
           el.currentTime = audioTimeSec;
@@ -544,6 +683,7 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
       const clipStart = clip.startMs;
       const clipEnd = clipStart + effectiveDur;
       if (timeMs >= clipStart && timeMs < clipEnd) {
+        el.volume = getClipVolumeAtTime(clip, timeMs);
         const audioTimeSec = (clip.trimStartMs + (timeMs - clipStart)) / 1000;
         el.currentTime = audioTimeSec;
       } else {
@@ -817,7 +957,7 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
         return;
       }
       const localMsA = Math.max(0, Math.min(timeMs - timingA.startMs, sceneA.durationMs));
-      const localProgressA = sceneA.durationMs > 0 ? localMsA / sceneA.durationMs : 0;
+      const localProgressA = getSceneProgress(sceneA, localMsA, (animA as { durationMs?: number }).durationMs);
       const localTimeSecA = localMsA / 1000;
 
       const ctxA = offA.getContext('2d')!;
@@ -837,7 +977,7 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
 
       if (animB && nextScene && nextTiming) {
         const nextLocalMs = Math.max(0, timeMs - nextTiming.startMs);
-        const nextLocalProgress = nextScene.durationMs > 0 ? nextLocalMs / nextScene.durationMs : 0;
+        const nextLocalProgress = getSceneProgress(nextScene, nextLocalMs, (animB as { durationMs?: number }).durationMs);
         const nextLocalTimeSec = nextLocalMs / 1000;
         const ctxB = offB.getContext('2d')!;
         ctxB.save();
@@ -871,7 +1011,7 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
         const anim = animations.get(entry.scene.animationId);
         if (!anim) continue;
         const localMs = Math.max(0, Math.min(timeMs - entry.timing.startMs, entry.scene.durationMs));
-        const localProgress = entry.scene.durationMs > 0 ? localMs / entry.scene.durationMs : 0;
+        const localProgress = getSceneProgress(entry.scene, localMs, (anim as { durationMs?: number }).durationMs);
         const localTimeSec = localMs / 1000;
         const connAudioClipId = resolveAudioClipForScene(entry.scene, anim, entry.timing.startMs, entry.timing.endMs, timeMs);
         const connAudioData = connAudioClipId ? getClipAudioData(connAudioClipId) : undefined;
@@ -907,7 +1047,7 @@ export function createSequencePlayer(options: SequencePlayerOptions): SequencePl
         continue;
       }
       const localMs = Math.max(0, Math.min(timeMs - entry.timing.startMs, entry.scene.durationMs));
-      const localProgress = entry.scene.durationMs > 0 ? localMs / entry.scene.durationMs : 0;
+      const localProgress = getSceneProgress(entry.scene, localMs, (anim as { durationMs?: number }).durationMs);
       const localTimeSec = localMs / 1000;
       const entryAudioClipId = resolveAudioClipForScene(entry.scene, anim, entry.timing.startMs, entry.timing.endMs, timeMs);
       const entryAudioData = entryAudioClipId ? getClipAudioData(entryAudioClipId) : undefined;

@@ -81,6 +81,7 @@
   }
   html {
     @apply scroll-smooth;
+    scrollbar-gutter: stable;
   }
   body {
     @apply bg-background text-foreground min-h-screen;
@@ -88,5 +89,15 @@
   }
   #root {
     @apply min-h-screen;
+  }
+}
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
   }
 }

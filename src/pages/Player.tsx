@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { createPlayer, type PlayerControls } from '../runtime/player';
-import { useAnimationRegistry, getAnimationById } from '../animations/registry';
+import { getAnimationById } from '../animations/registry';
+import { loadAnimationCloud } from '../lib/animation-cloud';
+import { useAuth } from '../context/AuthContext';
+import { useWorkspace } from '../context/WorkspaceContext';
 import { ParameterPanel, useParameters } from '../components/ParameterPanel';
 import { ExportPanel } from '../components/ExportPanel';
 import type { AnimationEntry } from '../runtime/types';
@@ -15,21 +18,30 @@ import { ArrowLeft, ArrowLeftRight, Play, Pause, RotateCcw, Save, Download, Sett
 
 export function Player() {
   const { id } = useParams<{ id: string }>();
-  const animations = useAnimationRegistry();
+  const workspace = useWorkspace();
   const [entry, setEntry] = useState<AnimationEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (id && animations.length > 0) {
-      const found = getAnimationById(id);
-      if (found) {
-        setEntry(found);
+    if (!id) return;
+    let cancelled = false;
+    const found = getAnimationById(id);
+    if (found) {
+      setEntry(found);
+      setError(null);
+      return;
+    }
+    loadAnimationCloud(id, workspace.workspace?.id ?? undefined).then(({ data }) => {
+      if (cancelled) return;
+      if (data) {
+        setEntry({ definition: data.definition, source: data.code, meta: undefined });
         setError(null);
       } else {
         setError(`Animation "${id}" not found`);
       }
-    }
-  }, [id, animations]);
+    });
+    return () => { cancelled = true; };
+  }, [id, workspace.workspace?.id]);
 
   if (error) {
     return (
@@ -59,6 +71,8 @@ export function Player() {
 }
 
 function PlayerView({ entry }: { entry: AnimationEntry }) {
+  const auth = useAuth();
+  const isAnonymous = auth.isConfigured && !auth.user;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const playerRef = useRef<PlayerControls | null>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
@@ -76,6 +90,9 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
 
   const { definition } = entry;
   const isSimple = isSimpleAnimation(definition);
+  const hasParams = !isSimple && definition.params && typeof (definition as any).params?.schema === 'object';
+  const paramSchema = hasParams ? (definition as any).params.schema : {};
+  const paramDefaults = hasParams ? (definition as any).params.defaults : {};
   const durationSec = definition.durationMs
     ? definition.durationMs / 1000
     : undefined;
@@ -86,11 +103,8 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
     entry.meta?.tags?.includes('audio') || 
     (!isSimple && definition.id?.startsWith('audio-'));
 
-  // Use our custom parameter hook (only for full format animations)
-  const { values: params, onChange: handleParamChange } = useParameters(
-    isSimple ? {} : definition.params.schema,
-    isSimple ? {} : definition.params.defaults
-  );
+  // Use our custom parameter hook (only for full format animations with params)
+  const { values: params, onChange: handleParamChange } = useParameters(paramSchema, paramDefaults);
 
   const handleFrame = useCallback((frame: number, time: number) => {
     setCurrentFrame(frame);
@@ -290,7 +304,7 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
             >
               {sidebarOpen ? <X className="h-4 w-4" /> : <Settings2 className="h-4 w-4" />}
             </Button>
-            {!isSimple && (
+            {!isSimple && !isAnonymous && (
               <Button
                 variant={saveStatus === 'success' ? 'default' : 'outline'}
                 onClick={handleSaveDefaults}
@@ -305,6 +319,9 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
                   {saveStatus === 'idle' && 'Save as Default'}
                 </span>
               </Button>
+            )}
+            {isAnonymous && (
+              <span className="text-xs text-muted-foreground hidden sm:inline">View only</span>
             )}
             <Button
               variant={showExport ? 'default' : 'outline'}
@@ -387,7 +404,7 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
                 )}
               </>
             )}
-            {!isSimple && (
+            {!isSimple && !isAnonymous && (
               <Button
                 variant={saveStatus === 'success' ? 'default' : 'outline'}
                 onClick={handleSaveDefaults}
@@ -412,9 +429,9 @@ function PlayerView({ entry }: { entry: AnimationEntry }) {
           </div>
 
           <div className="p-4">
-            {!isSimple && (
+            {hasParams && (
               <ParameterPanel
-                schema={definition.params.schema}
+                schema={paramSchema}
                 values={params}
                 onChange={handleParamChange}
               />

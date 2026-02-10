@@ -1,5 +1,5 @@
 import type { AnimationDefinition } from '../../runtime/types';
-import { number, color, select, folder } from '../../runtime/params';
+import { number, color, select, folder, string } from '../../runtime/params';
 
 interface TextHighlightSweepParams {
   // Layout
@@ -67,6 +67,7 @@ const animation: AnimationDefinition<TextHighlightSweepParams> = {
         scale: number({ value: 1, min: 0.1, max: 3, step: 0.1, label: 'Scale' }),
       }),
       ...folder('Text', {
+        content: string({ value: 'Highlight', label: 'Text' }),
         fontFamily: select({
           value: 'Inter',
           options: [

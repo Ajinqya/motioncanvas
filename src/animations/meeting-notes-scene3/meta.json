@@ -1,0 +1,19 @@
+{
+  "id": "meeting-notes-scene3",
+  "name": "Meeting Notes Scene 3",
+  "createdAt": "2026-02-10T00:00:00.000Z",
+  "updatedAt": "2026-02-10T09:08:57.273Z",
+  "source": {
+    "type": "design",
+    "notes": "Granola meeting notes - cursor clicks plus, sidebar opens, tick reveal, typing animation. Full timing control via params."
+  },
+  "prompt": "Interactive UI: cursor moves to plus button, clicks, sidebar opens with bounce. Cursor moves to first option, tick reveals. Text box scales up, sidebar fades. Granola logo appears. Typing animation for two sentences.",
+  "tags": [
+    "meeting-notes",
+    "granola",
+    "cursor",
+    "sidebar",
+    "typing",
+    "interactive-ui"
+  ]
+}
