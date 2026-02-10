@@ -452,14 +452,14 @@ export function Gallery() {
 
   const loadSequenceById = useCallback(
     async (id: string): Promise<Sequence | null> => {
-      if (isAnonymous) {
+      if (isAnonymous || viewMode === 'public') {
         const { data } = await loadPublicSequenceCloud(id);
         return data;
       }
       if (useCloud) return workspace.loadSequence(id);
       return loadSequence(id);
     },
-    [isAnonymous, useCloud, workspace]
+    [isAnonymous, viewMode, useCloud, workspace]
   );
 
   const handleSequenceOpen = useCallback(

@@ -5,6 +5,7 @@ import type { SavedSequenceMeta } from '../runtime/sequence-storage';
 import {
   saveSequenceCloud,
   loadSequenceCloud,
+  loadPublicSequenceCloud,
   listSequencesCloud,
   deleteSequenceCloud,
   promoteSequenceCloud,
@@ -151,7 +152,9 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     async (id: string) => {
       if (!workspace) return null;
       const { data } = await loadSequenceCloud(workspace.id, id);
-      return data;
+      if (data) return data;
+      const { data: publicData } = await loadPublicSequenceCloud(id);
+      return publicData;
     },
     [workspace]
   );
