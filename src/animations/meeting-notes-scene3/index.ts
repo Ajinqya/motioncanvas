@@ -527,7 +527,7 @@ const animation: AnimationDefinition<Scene3Params> = {
       sidebarSlideDownDurationMs,
       pauseAfterTickMs,
       phase3ScaleDurationMs,
-      phase3FadeoutDurationMs,
+      phase3FadeoutDurationMs: _phase3FadeoutDurationMs,
       granolaRevealDelayMs,
       granolaRevealDurationMs,
       pauseAfterScaleMs,

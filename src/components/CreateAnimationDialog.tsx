@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -74,16 +74,20 @@ export function CreateAnimationDialog({ open, onOpenChange, onSave }: CreateAnim
     const previewCtx = canvas.getContext('2d');
     if (!previewCtx) return;
 
+    const ctx = previewCtx;
+    const canvasEl = canvas;
+    const compiled = compiledResult;
+
     const w = config.width || 800;
     const h = config.height || 600;
     const previewScale = Math.min(280 / w, 160 / h);
     const displayW = Math.round(w * previewScale);
     const displayH = Math.round(h * previewScale);
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(displayW * dpr);
-    canvas.height = Math.round(displayH * dpr);
-    canvas.style.width = `${displayW}px`;
-    canvas.style.height = `${displayH}px`;
+    canvasEl.width = Math.round(displayW * dpr);
+    canvasEl.height = Math.round(displayH * dpr);
+    canvasEl.style.width = `${displayW}px`;
+    canvasEl.style.height = `${displayH}px`;
 
     const durationMs = config.durationMs || 3000;
     let startTime: number | null = null;
@@ -93,17 +97,17 @@ export function CreateAnimationDialog({ open, onOpenChange, onSave }: CreateAnim
       const elapsed = (timestamp - startTime) % durationMs;
       const progress = elapsed / durationMs;
 
-      previewCtx.save();
-      previewCtx.setTransform(1, 0, 0, 1, 0, 0);
-      previewCtx.clearRect(0, 0, canvas.width, canvas.height);
-      previewCtx.scale(previewScale * dpr, previewScale * dpr);
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+      ctx.scale(previewScale * dpr, previewScale * dpr);
 
-      compiledResult.render(previewCtx as unknown as CanvasRenderingContext2D, {
+      compiled.render(ctx as unknown as CanvasRenderingContext2D, {
         width: w,
         height: h,
         progress,
       });
-      previewCtx.restore();
+      ctx.restore();
 
       previewRafRef.current = requestAnimationFrame(animate);
     }
@@ -133,7 +137,7 @@ export function CreateAnimationDialog({ open, onOpenChange, onSave }: CreateAnim
       return;
     }
     setSaving(true);
-    const { localId, error } = await onSave({
+    const { error } = await onSave({
       name: config.name ?? name,
       code,
       config: { ...config, name: config.name ?? name },

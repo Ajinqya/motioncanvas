@@ -35,17 +35,6 @@ import type { CustomCodeConfig } from './sequence';
 const globalImageCache = new Map<string, HTMLImageElement>();
 const globalImageLoadingPromises = new Map<string, Promise<HTMLImageElement>>();
 
-function hashString(str: string): string {
-  // Simple hash for cache key (not cryptographic)
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  return hash.toString(36);
-}
-
 function getCachedImage(key: string): HTMLImageElement | undefined {
   return globalImageCache.get(key);
 }
@@ -330,7 +319,7 @@ function patchImageCache(js: string, animId: string): string {
   // Pattern: const svgImages = new Map()
   patched = patched.replace(
     /\b(const|let|var)\s+(svgImages|logoImages|imageCache|images)\s*=\s*new\s+Map\s*\(\s*\)/g,
-    (match, decl, varName) => {
+    (_match, decl, varName) => {
       // Create a namespaced proxy Map that prefixes all keys
       return `${decl} ${varName} = {
         set: function(k, v) { __imageCache.set('${cachePrefix}' + k, v); },
@@ -356,7 +345,7 @@ function patchImageCache(js: string, animId: string): string {
   // Pattern: let xxxImage = null
   patched = patched.replace(
     /\b(let|var)\s+(\w+Image)\s*=\s*null\s*;/g,
-    (match, decl, varName) => {
+    (_match, decl, varName) => {
       const namespacedKey = `${cachePrefix}${varName}`;
       return `${decl} ${varName} = __imageCache.get('${namespacedKey}') || null;`;
     }
@@ -366,7 +355,7 @@ function patchImageCache(js: string, animId: string): string {
   // Pattern: mainCardImage = img; → mainCardImage = img; __imageCache.set('scene3:mainCardImage', img);
   patched = patched.replace(
     /(\w+Image)\s*=\s*img\s*;/g,
-    (match, varName) => {
+    (_match, varName) => {
       const namespacedKey = `${cachePrefix}${varName}`;
       return `${varName} = img; __imageCache.set('${namespacedKey}', img);`;
     }
@@ -387,7 +376,7 @@ function compileFullModule(
 ): SimpleAnimationDefinition | null {
   let js = stripTypeScript(code);
   // #region agent log
-  try { const _strayGT = (js.match(/\b(const|let|var)\s+\w+\s*>/g) || []).slice(0, 5); const _firstGT = js.indexOf('>'); const _gtCtx = _firstGT >= 0 ? js.substring(Math.max(0, _firstGT - 40), _firstGT + 40) : ''; const _lines = js.split('\n'); const _errLines = _lines.map((l: string, i: number) => l.includes('>') && !l.includes('`') && !l.includes("'") && !l.includes('"') ? `L${i+1}: ${l.substring(0,120)}` : null).filter(Boolean).slice(0, 10); fetch('http://127.0.0.1:7244/ingest/e9ceb641-0cf4-461d-966d-fe697b328db3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'custom-code.ts:compileFullModule',message:'stripped JS output',data:{jsLength:js.length,codeLength:code.length,strayGT:_strayGT,linesWithGT:_errLines,first500:js.substring(0,500)},timestamp:Date.now(),hypothesisId:'A-B-D'})}).catch(()=>{}); } catch(_e) {}
+  try { const _strayGT = (js.match(/\b(const|let|var)\s+\w+\s*>/g) || []).slice(0, 5); const _firstGT = js.indexOf('>'); const _lines = js.split('\n'); const _errLines = _lines.map((l: string, i: number) => l.includes('>') && !l.includes('`') && !l.includes("'") && !l.includes('"') ? `L${i+1}: ${l.substring(0,120)}` : null).filter(Boolean).slice(0, 10); fetch('http://127.0.0.1:7244/ingest/e9ceb641-0cf4-461d-966d-fe697b328db3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'custom-code.ts:compileFullModule',message:'stripped JS output',data:{jsLength:js.length,codeLength:code.length,strayGT:_strayGT,linesWithGT:_errLines,firstGT:_firstGT,first500:js.substring(0,500)},timestamp:Date.now(),hypothesisId:'A-B-D'})}).catch(()=>{}); } catch(_e) {}
   // #endregion
   
   // Extract animation ID for namespacing (if available)

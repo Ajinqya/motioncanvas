@@ -38,7 +38,6 @@ interface MeetingNotesParams {
 }
 
 // ── Font Loading ────────────────────────────────────────────────
-let fontReady = false;
 let fontAttempted = false;
 
 function loadFonts(): void {
@@ -55,10 +54,9 @@ function loadFonts(): void {
     .load()
     .then((loaded) => {
       document.fonts.add(loaded);
-      fontReady = true;
     })
     .catch(() => {
-      fontReady = true; // Continue even if font fails
+      // Continue even if font fails
     });
 }
 
@@ -378,7 +376,7 @@ const animation: AnimationDefinition<MeetingNotesParams> = {
     loadFonts();
   },
 
-  render({ ctx, width, height, progress, params, time }) {
+  render({ ctx, width, height, params, time }) {
     const { scale, textColor, backgroundColor, speed, fontSize } = params;
 
     const { timeline, totalMs } = buildTimeline(params);
