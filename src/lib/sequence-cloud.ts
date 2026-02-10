@@ -116,6 +116,7 @@ function toMeta(row: CloudSequenceMetaRow): SavedSequenceMeta {
     height: row.height,
     isPublic: row.is_public ?? false,
     creatorEmail: row.creator_email ?? undefined,
+    workspaceId: row.workspace_id,
   };
 }
 
@@ -123,8 +124,8 @@ function toMeta(row: CloudSequenceMetaRow): SavedSequenceMeta {
 export async function saveSequenceCloud(
   workspaceId: string,
   seq: Sequence
-): Promise<{ error: Error | null }> {
-  if (!supabase) return { error: new Error('Supabase not configured') };
+): Promise<{ data: Sequence | null; error: Error | null }> {
+  if (!supabase) return { data: null, error: new Error('Supabase not configured') };
 
   const seqToSave = await ensureAudioUrlsPersisted(seq, workspaceId);
 
@@ -150,7 +151,10 @@ export async function saveSequenceCloud(
     { onConflict: 'workspace_id,local_id' }
   );
 
-  return { error: error ? new Error(error.message) : null };
+  return {
+    data: error ? null : seqToSave,
+    error: error ? new Error(error.message) : null,
+  };
 }
 
 /** Promote sequence to public */
@@ -255,18 +259,27 @@ export async function loadSequenceCloud(
   return { data: seq as Sequence, error: null };
 }
 
-/** Load a public sequence by id (no auth required) */
+/** Load a public sequence by id. Pass workspaceId when known to avoid 406 when multiple rows share the same local_id. */
 export async function loadPublicSequenceCloud(
-  localId: string
+  localId: string,
+  workspaceId?: string
 ): Promise<{ data: Sequence | null; error: Error | null }> {
   if (!supabase) return { data: null, error: new Error('Supabase not configured') };
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('sequences')
     .select('data')
     .eq('local_id', localId)
-    .eq('is_public', true)
-    .single();
+    .eq('is_public', true);
+
+  if (workspaceId) {
+    query = query.eq('workspace_id', workspaceId);
+  }
+
+  const { data, error } = await query
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
   if (error || !data) return { data: null, error: error ? new Error(error.message) : null };
 

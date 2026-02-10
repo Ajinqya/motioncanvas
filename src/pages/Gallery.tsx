@@ -96,7 +96,7 @@ function SequenceCard({
 }: {
   meta: SavedSequenceMeta;
   isHovered: boolean;
-  loadSequence: (id: string) => Promise<Sequence | null>;
+  loadSequence: (id: string, workspaceId?: string) => Promise<Sequence | null>;
   assignedTab: string;
   allTabs: { id: string; name: string }[];
   onOpen: () => void;
@@ -117,11 +117,11 @@ function SequenceCard({
 
   useEffect(() => {
     let cancelled = false;
-    loadSequence(meta.id).then((result) => {
+    loadSequence(meta.id, meta.workspaceId).then((result) => {
       if (!cancelled && result) setSeq(result);
     });
     return () => { cancelled = true; };
-  }, [meta.id, loadSequence]);
+  }, [meta.id, meta.workspaceId, loadSequence]);
 
   return (
     <div
@@ -451,9 +451,9 @@ export function Gallery() {
   }, [viewMode, useCloud, workspace]);
 
   const loadSequenceById = useCallback(
-    async (id: string): Promise<Sequence | null> => {
+    async (id: string, workspaceId?: string): Promise<Sequence | null> => {
       if (isAnonymous || viewMode === 'public') {
-        const { data } = await loadPublicSequenceCloud(id);
+        const { data } = await loadPublicSequenceCloud(id, workspaceId);
         return data;
       }
       if (useCloud) return workspace.loadSequence(id);
@@ -485,7 +485,7 @@ export function Gallery() {
     setSequenceDeleting(true);
     try {
       if (useCloud) {
-        const { error } = await workspace.deleteSequence(sequenceToDelete.id);
+        const { error } = await workspace.deleteSequence(sequenceToDelete.id, sequenceToDelete.workspaceId);
         if (error) {
           toast.error(error.message);
           return;
@@ -506,7 +506,7 @@ export function Gallery() {
     async (e: React.MouseEvent, meta: SavedSequenceMeta) => {
       e.preventDefault();
       e.stopPropagation();
-      const seq = await loadSequenceById(meta.id);
+      const seq = await loadSequenceById(meta.id, meta.workspaceId);
       if (seq) {
         exportSequenceFile(seq);
         toast.success(`Exported "${meta.name}"`);
@@ -522,7 +522,7 @@ export function Gallery() {
       e.preventDefault();
       e.stopPropagation();
       if (!useCloud) return;
-      const { error } = await workspace.promoteSequence(meta.id);
+      const { error } = await workspace.promoteSequence(meta.id, meta.workspaceId);
       if (error) toast.error(error.message);
       else {
         refreshSequences();
@@ -537,7 +537,7 @@ export function Gallery() {
       e.preventDefault();
       e.stopPropagation();
       if (!useCloud) return;
-      const { error } = await workspace.demoteSequence(meta.id);
+      const { error } = await workspace.demoteSequence(meta.id, meta.workspaceId);
       if (error) toast.error(error.message);
       else {
         refreshSequences();

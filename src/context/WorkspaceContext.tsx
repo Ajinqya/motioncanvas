@@ -36,11 +36,11 @@ interface WorkspaceContextValue {
   animationsLoading: boolean;
   refreshSequences: () => Promise<void>;
   refreshAnimations: () => Promise<void>;
-  saveSequence: (seq: Sequence) => Promise<{ error: Error | null }>;
+  saveSequence: (seq: Sequence) => Promise<{ data: Sequence | null; error: Error | null }>;
   loadSequence: (id: string) => Promise<Sequence | null>;
-  deleteSequence: (id: string) => Promise<{ error: Error | null }>;
-  promoteSequence: (id: string) => Promise<{ error: Error | null }>;
-  demoteSequence: (id: string) => Promise<{ error: Error | null }>;
+  deleteSequence: (id: string, targetWorkspaceId?: string) => Promise<{ error: Error | null }>;
+  promoteSequence: (id: string, targetWorkspaceId?: string) => Promise<{ error: Error | null }>;
+  demoteSequence: (id: string, targetWorkspaceId?: string) => Promise<{ error: Error | null }>;
   saveAnimation: (input: CloudAnimationInput) => Promise<{ localId: string; error: Error | null }>;
   promoteAnimation: (localId: string) => Promise<{ error: Error | null }>;
   demoteAnimation: (localId: string) => Promise<{ error: Error | null }>;
@@ -142,43 +142,46 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
   const saveSequence = useCallback(
     async (seq: Sequence) => {
-      if (!workspace) return { error: new Error('No workspace') };
+      if (!workspace) return { data: null, error: new Error('No workspace') };
       return saveSequenceCloud(workspace.id, seq);
     },
     [workspace]
   );
 
   const loadSequence = useCallback(
-    async (id: string) => {
+    async (id: string, workspaceId?: string) => {
       if (!workspace) return null;
       const { data } = await loadSequenceCloud(workspace.id, id);
       if (data) return data;
-      const { data: publicData } = await loadPublicSequenceCloud(id);
+      const { data: publicData } = await loadPublicSequenceCloud(id, workspaceId);
       return publicData;
     },
     [workspace]
   );
 
   const deleteSequence = useCallback(
-    async (id: string) => {
+    async (id: string, targetWorkspaceId?: string) => {
       if (!workspace) return { error: new Error('No workspace') };
-      return deleteSequenceCloud(workspace.id, id);
+      const wsId = targetWorkspaceId ?? workspace.id;
+      return deleteSequenceCloud(wsId, id);
     },
     [workspace]
   );
 
   const promoteSequence = useCallback(
-    async (id: string) => {
+    async (id: string, targetWorkspaceId?: string) => {
       if (!workspace) return { error: new Error('No workspace') };
-      return promoteSequenceCloud(workspace.id, id, user?.id ?? null, user?.email ?? null);
+      const wsId = targetWorkspaceId ?? workspace.id;
+      return promoteSequenceCloud(wsId, id, user?.id ?? null, user?.email ?? null);
     },
     [workspace, user?.id, user?.email]
   );
 
   const demoteSequence = useCallback(
-    async (id: string) => {
+    async (id: string, targetWorkspaceId?: string) => {
       if (!workspace) return { error: new Error('No workspace') };
-      return demoteSequenceCloud(workspace.id, id);
+      const wsId = targetWorkspaceId ?? workspace.id;
+      return demoteSequenceCloud(wsId, id);
     },
     [workspace]
   );

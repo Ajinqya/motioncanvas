@@ -2861,8 +2861,9 @@ export function Composer() {
     if (sequence.scenes.length === 0 && sequence.name === 'Untitled Sequence') return;
     const t = setTimeout(() => {
       if (workspace.useCloud) {
-        workspace.saveSequence(sequence).then(({ error }) => {
+        workspace.saveSequence(sequence).then(({ data, error }) => {
           if (error) console.warn('Auto-save failed:', error.message);
+          else if (data) setSequence(data);
         });
       } else {
         saveSequence(sequence);
@@ -3023,11 +3024,12 @@ export function Composer() {
 
   const handleSave = useCallback(async () => {
     if (workspace.useCloud) {
-      const { error } = await workspace.saveSequence(sequence);
+      const { data, error } = await workspace.saveSequence(sequence);
       if (error) {
         toast.error(error.message);
         return;
       }
+      if (data) setSequence(data);
       toast.success('Sequence saved to cloud');
     } else {
       saveSequence(sequence);
@@ -3037,11 +3039,12 @@ export function Composer() {
 
   const handlePromote = useCallback(async () => {
     if (!workspace.useCloud) return;
-    const { error } = await workspace.saveSequence(sequence);
+    const { data, error } = await workspace.saveSequence(sequence);
     if (error) {
       toast.error(error.message);
       return;
     }
+    if (data) setSequence(data);
     const { error: promoteError } = await workspace.promoteSequence(sequence.id);
     if (promoteError) toast.error(promoteError.message);
     else {

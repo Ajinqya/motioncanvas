@@ -42,6 +42,8 @@ export interface SavedSequenceMeta {
   height: number;
   isPublic?: boolean;
   creatorEmail?: string;
+  /** Cloud only: workspace id for unambiguous loading when duplicate local_ids exist */
+  workspaceId?: string;
 }
 
 function storageKey(id: string): string {
