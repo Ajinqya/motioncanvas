@@ -1,12 +1,81 @@
 /**
  * Cloud persistence for sequences via Supabase.
  * Used when user is signed in and Supabase is configured.
+ *
+ * Audio clips use blob URLs (from URL.createObjectURL) which are session-specific.
+ * Before saving, we upload blob URLs to Supabase Storage and replace with public URLs
+ * so other users can load the sequence and see waveforms.
  */
 
-import type { Sequence } from '../runtime/sequence';
+import type { Sequence, AudioClipEntry } from '../runtime/sequence';
 import { getSequenceDurationMs } from '../runtime/sequence';
 import { supabase } from './supabase';
 import type { SavedSequenceMeta } from '../runtime/sequence-storage';
+
+const SEQUENCE_AUDIO_BUCKET = 'sequence-audio';
+
+/** Upload blob URL to Supabase Storage, return public URL or null on error */
+async function uploadBlobToStorage(
+  blobUrl: string,
+  workspaceId: string,
+  seqId: string,
+  clipId: string,
+  filename: string
+): Promise<string | null> {
+  if (!supabase) return null;
+  try {
+    const res = await fetch(blobUrl);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    const ext = filename.includes('.') ? filename.split('.').pop()?.toLowerCase() ?? 'audio' : 'audio';
+    const safeExt = /^[a-z0-9]+$/i.test(ext ?? '') ? ext : 'audio';
+    const path = `${workspaceId}/${seqId}/${clipId}.${safeExt}`;
+    const { error } = await supabase.storage
+      .from(SEQUENCE_AUDIO_BUCKET)
+      .upload(path, blob, { contentType: blob.type || 'audio/mpeg', upsert: true });
+    if (error) return null;
+    const { data } = supabase.storage.from(SEQUENCE_AUDIO_BUCKET).getPublicUrl(path);
+    return data.publicUrl;
+  } catch {
+    return null;
+  }
+}
+
+/** Replace blob URLs in audio clips with Supabase Storage URLs */
+async function ensureAudioUrlsPersisted(
+  seq: Sequence,
+  workspaceId: string
+): Promise<Sequence> {
+  const clips = seq.audioClips ?? [];
+  if (clips.length === 0) return seq;
+
+  const updatedClips: AudioClipEntry[] = [];
+  let changed = false;
+
+  for (const clip of clips) {
+    const url = clip.audioUrl;
+    if (url.startsWith('blob:')) {
+      const storageUrl = await uploadBlobToStorage(
+        url,
+        workspaceId,
+        seq.id,
+        clip.clipId,
+        clip.audioFilename
+      );
+      if (storageUrl) {
+        updatedClips.push({ ...clip, audioUrl: storageUrl });
+        changed = true;
+      } else {
+        updatedClips.push(clip);
+      }
+    } else {
+      updatedClips.push(clip);
+    }
+  }
+
+  if (!changed) return seq;
+  return { ...seq, audioClips: updatedClips };
+}
 
 /** Validate that parsed data looks like a Sequence */
 function validateSequence(data: unknown): data is Sequence {
@@ -57,7 +126,9 @@ export async function saveSequenceCloud(
 ): Promise<{ error: Error | null }> {
   if (!supabase) return { error: new Error('Supabase not configured') };
 
-  const durationMs = getSequenceDurationMs(seq.scenes, seq.audioClips ?? []);
+  const seqToSave = await ensureAudioUrlsPersisted(seq, workspaceId);
+
+  const durationMs = getSequenceDurationMs(seqToSave.scenes, seqToSave.audioClips ?? []);
 
   const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
 
@@ -66,13 +137,13 @@ export async function saveSequenceCloud(
   .upsert(
     {
       workspace_id: workspaceId,
-      local_id: seq.id,
-      name: seq.name,
-      data: seq,
-      scene_count: seq.scenes.length,
-      duration_ms: Math.round(durationMs),   // <-- add Math.round()
-      width: Math.round(seq.width),           // <-- add Math.round()
-      height: Math.round(seq.height),        // <-- add Math.round()
+      local_id: seqToSave.id,
+      name: seqToSave.name,
+      data: seqToSave,
+      scene_count: seqToSave.scenes.length,
+      duration_ms: Math.round(durationMs),
+      width: Math.round(seqToSave.width),
+      height: Math.round(seqToSave.height),
       updated_at: new Date().toISOString(),
       updated_by: userId,
     },
