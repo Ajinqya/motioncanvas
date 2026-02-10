@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAnimationRegistry } from '../animations/registry';
 import { useDeletedAnimations } from '../hooks/useDeletedAnimations';
 import {
@@ -2634,6 +2634,7 @@ function Timeline({
 
 export function Composer() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const allAnimations = useAnimationRegistry();
   const { isDeleted } = useDeletedAnimations();
   const animations = useMemo(
@@ -3030,12 +3031,13 @@ export function Composer() {
         return;
       }
       if (data) setSequence(data);
+      workspace.refreshSequences();
       toast.success('Sequence saved to cloud');
     } else {
       saveSequence(sequence);
       toast.success('Sequence saved');
     }
-  }, [sequence, workspace.useCloud, workspace.saveSequence]);
+  }, [sequence, workspace.useCloud, workspace.saveSequence, workspace.refreshSequences]);
 
   const handlePromote = useCallback(async () => {
     if (!workspace.useCloud) return;
@@ -4362,11 +4364,14 @@ export function Composer() {
       <header className="sticky top-0 z-40 border-b bg-background flex-shrink-0">
         <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-3 min-w-0">
-            <Button variant="ghost" size="icon" asChild className="flex-shrink-0" title="Gallery">
-              <Link to="/"><ArrowLeft className="h-5 w-5" /></Link>
-            </Button>
-            <Button variant="ghost" size="icon" asChild className="flex-shrink-0" title="Sequences">
-              <Link to="/?tab=sequences"><Film className="h-5 w-5" /></Link>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="flex-shrink-0"
+              title="Back"
+              onClick={() => navigate(-1)}
+            >
+              <ArrowLeft className="h-5 w-5" />
             </Button>
             <div className="flex items-center gap-2 min-w-0">
               <Layers className="h-4 w-4 text-muted-foreground flex-shrink-0" />
